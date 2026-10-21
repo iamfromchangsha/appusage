@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>应用使用时长 · 本地仪表盘</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230e4429'/%3E%3Crect x='6' y='6' width='8' height='8' rx='2' fill='%23006d32'/%3E%3Crect x='17' y='6' width='9' height='8' rx='2' fill='%2339d353'/%3E%3Crect x='6' y='17' width='9' height='9' rx='2' fill='%2326a641'/%3E%3Crect x='18' y='17' width='8' height='9' rx='2' fill='%23006d32'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="logo" aria-hidden="true"></div>
+    <div>
+      <h1>应用使用时长</h1>
+      <p class="sub">本机前台应用活跃度追踪 · 数据仅存本地</p>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div id="statusChip" class="chip chip-off">
+      <span class="dot"></span><span id="statusText">连接中…</span>
+    </div>
+    <button id="refreshBtn" class="btn">刷新</button>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- 统计卡片 -->
+  <section class="cards" id="cards">
+    <div class="card stat">
+      <div class="stat-label">今日使用</div>
+      <div class="stat-value" id="sToday">–</div>
+      <div class="stat-sub" id="sTodaySub">–</div>
+    </div>
+    <div class="card stat">
+      <div class="stat-label">昨日使用</div>
+      <div class="stat-value" id="sYest">–</div>
+      <div class="stat-sub" id="sYestSub">–</div>
+    </div>
+    <div class="card stat">
+      <div class="stat-label">近 7 天</div>
+      <div class="stat-value" id="sWeek">–</div>
+      <div class="stat-sub" id="sWeekSub">–</div>
+    </div>
+    <div class="card stat">
+      <div class="stat-label">近 30 天</div>
+      <div class="stat-value" id="sMonth">–</div>
+      <div class="stat-sub" id="sMonthSub">–</div>
+    </div>
+    <div class="card stat stat-accent">
+      <div class="stat-label">累计使用</div>
+      <div class="stat-value" id="sTotal">–</div>
+      <div class="stat-sub" id="sTotalSub">–</div>
+    </div>
+  </section>
+
+  <div class="grid-main">
+
+    <!-- 热力图 -->
+    <section class="card heat-card">
+      <div class="card-head">
+        <div>
+          <h2>每日活跃热力图</h2>
+          <p class="muted" id="heatSub">加载中…</p>
+        </div>
+        <div class="head-tools">
+          <div class="seg" id="rangeSeg">
+            <button data-weeks="17">3 个月</button>
+            <button data-weeks="26">半年</button>
+            <button data-weeks="53" class="on">一年</button>
+          </div>
+          <div class="seg" id="paletteSeg">
+            <button data-pal="green" class="on">绿</button>
+            <button data-pal="blue">蓝</button>
+            <button data-pal="orange">橙</button>
+            <button data-pal="purple">紫</button>
+            <button data-pal="mono">灰</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="heat-scroll">
+        <div class="heat-wrap">
+          <div class="month-row" id="monthRow"></div>
+          <div class="heat-body">
+            <div class="dow-col" id="dowCol"></div>
+            <div class="heat-grid" id="heatGrid"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="heat-foot">
+        <div class="legend">
+          <span>少</span>
+          <i class="lv0"></i><i class="lv1"></i><i class="lv2"></i><i class="lv3"></i><i class="lv4"></i>
+          <span>多</span>
+        </div>
+        <div class="hint">点击任意格子查看当天明细</div>
+      </div>
+
+      <div class="recent">
+        <div class="recent-head">
+          <span>最近 30 天</span>
+          <span class="muted" id="recentSub">–</span>
+        </div>
+        <div class="recent-bars" id="recentBars"></div>
+        <div class="recent-axis" id="recentAxis"><span>–</span><span>–</span></div>
+      </div>
+    </section>
+
+    <!-- 右侧 -->
+    <aside class="side">
+      <section class="card">
+        <div class="card-head"><h2>今日排行</h2><span class="muted" id="todayTotal">–</span></div>
+        <ul class="rank" id="todayRank"></ul>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>今日时间线</h2><span class="muted">按小时</span></div>
+        <div class="tl-wrap">
+          <div class="timeline" id="todayTimeline"></div>
+          <div class="timeline-labels"><span>0</span><span>6</span><span>12</span><span>18</span><span>23</span></div>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <!-- 累计排行 -->
+  <section class="card" style="margin-bottom:18px">
+    <div class="card-head">
+      <div>
+        <h2>累计排行</h2>
+        <p class="muted">按累计使用时长排序</p>
+      </div>
+      <span class="muted" id="totalSub">–</span>
+    </div>
+    <ul class="rank-grid" id="totalRank"></ul>
+  </section>
+
+  <!-- 应用明细表 -->
+  <section class="card table-card">
+    <div class="card-head">
+      <div>
+        <h2>应用明细</h2>
+        <p class="muted" id="tableSub">–</p>
+      </div>
+      <div class="head-tools">
+        <input id="searchInput" class="input" type="search" placeholder="搜索应用…" />
+        <button id="exportBtn" class="btn">导出 CSV</button>
+      </div>
+    </div>
+    <div class="table-scroll">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th class="th-name" data-sort="name">应用</th>
+            <th data-sort="today">今日</th>
+            <th data-sort="d7">近 7 天</th>
+            <th data-sort="d30">近 30 天</th>
+            <th data-sort="total" class="th-total">累计</th>
+            <th data-sort="last_seen">最近使用</th>
+          </tr>
+        </thead>
+        <tbody id="appBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <span>本地追踪 · 无网络上报 · 停止追踪器：Ctrl+C 或运行 <code>stop-tracker.ps1</code></span>
+  </footer>
+</main>
+
+<!-- 悬浮提示 -->
+<div id="tip" class="tip"></div>
+
+<!-- 单日抽屉 -->
+<div id="drawerMask" class="drawer-mask"></div>
+<aside id="drawer" class="drawer">
+  <div class="drawer-head">
+    <div>
+      <h2 id="dTitle">–</h2>
+      <p class="muted" id="dSub">–</p>
+    </div>
+    <button id="dClose" class="btn btn-icon" aria-label="关闭">✕</button>
+  </div>
+  <div class="drawer-body">
+    <div class="d-total"><span id="dTotal">–</span></div>
+    <h3 class="mini">按小时</h3>
+    <div class="tl-wrap">
+      <div class="timeline" id="dTimeline"></div>
+      <div class="timeline-labels"><span>0</span><span>6</span><span>12</span><span>18</span><span>23</span></div>
+    </div>
+    <h3 class="mini">应用分布</h3>
+    <ul class="rank" id="dApps"></ul>
+  </div>
+</aside>
+
+<script src="/app.js"></script>
+</body>
+</html>

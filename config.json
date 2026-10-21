@@ -1,0 +1,23 @@
+{
+  "poll_interval": 1.0,
+  "idle_seconds": 90,
+  "min_span_seconds": 2.0,
+  "flush_interval": 20.0,
+  "db_path": "data/usage.db",
+  "excluded_exes": [],
+  "app_names": {
+    "chrome": "Chrome",
+    "msedge": "Microsoft Edge",
+    "code": "VS Code",
+    "wechat": "微信",
+    "weixin": "微信",
+    "qq": "QQ",
+    "steam": "Steam",
+    "explorer": "文件资源管理器",
+    "bilibili": "哔哩哔哩",
+    "zhihu": "知乎",
+    "dingtalk": "钉钉",
+    "neteasemusic": "网易云音乐",
+    "qqmusic": "QQ音乐"
+  }
+}

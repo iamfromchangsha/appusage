@@ -1,0 +1,26 @@
+# ---- 构建产物 ----
+native/bin/
+native/obj/
+dist/
+*.user
+
+# ---- 运行时数据（每人自己的用量记录，不该进仓库）----
+data/
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# ---- Python 缓存 ----
+__pycache__/
+*.pyc
+
+# ---- 工具缓存 ----
+.playwright-cli/
+.vs/
+.vscode/
+.idea/
+
+# ---- 系统文件 ----
+Thumbs.db
+Desktop.ini
