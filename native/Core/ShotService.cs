@@ -136,7 +136,8 @@ internal sealed class ShotService : IDisposable
         var name = $"{now:HH-mm-ss}_{Sanitize(appKey)}";
         SaveThumb(todayDir, name, jpeg, shots.ThumbWidth, shots.JpegQuality);
 
-        var relPath = $"shots/{now:yyyy}/{now:MM}/{now:DD}/{name}.jpg";
+        // 注意：.NET 自定义日期格式里必须用小写 dd（大写 DD 会被原样输出成字面量 "DD"）
+        var relPath = $"shots/{now:yyyy}/{now:MM}/{now:dd}/{name}.jpg";
         _ = UploadAsync(relPath, jpeg, name, now);
     }
 
@@ -192,7 +193,7 @@ internal sealed class ShotService : IDisposable
             {
                 var name = Path.GetFileNameWithoutExtension(f);
                 var at = ParseAt(name);
-                var rel = $"shots/{at:yyyy}/{at:MM}/{at:DD}/{name}.jpg";
+                var rel = $"shots/{at:yyyy}/{at:MM}/{at:dd}/{name}.jpg";
                 var err = Uploader!.UploadAsync(rel, File.ReadAllBytes(f), $"appusage shot {at:yyyy-MM-dd HH:mm:ss}", CancellationToken.None)
                                    .GetAwaiter().GetResult();
                 if (err is null)

@@ -23,8 +23,10 @@ internal static class ShotIndex
                 ThumbPath = file,
                 App = app,
                 At = day.Date + time,
-                // 只有真传上去的才给 GitHub 链接，避免点开 404
-                GithubUrl = uploaded.ContainsKey(name) ? BlobUrl(config, day, name) : string.Empty,
+                // 直接用上传清单里记的路径（唯一真源），避免两处各拼一遍格式串
+                GithubUrl = uploaded.TryGetValue(name, out var rel) && rel.Length > 0
+                    ? BlobUrl(config, rel)
+                    : string.Empty,
                 Uploaded = uploaded.ContainsKey(name),
             });
         }
@@ -49,11 +51,11 @@ internal static class ShotIndex
         return map;
     }
 
-    public static string BlobUrl(Config config, DateTime day, string name)
+    public static string BlobUrl(Config config, string relPath)
     {
         var s = config.Shots;
         if (!s.HasGithub) return string.Empty;
-        return $"https://github.com/{s.GithubOwner}/{s.GithubRepo}/blob/main/shots/{day:yyyy}/{day:MM}/{day:DD}/{name}.jpg";
+        return $"https://github.com/{s.GithubOwner}/{s.GithubRepo}/blob/main/{relPath}";
     }
 
     public static string RelPath(DateTime day, string name) =>
