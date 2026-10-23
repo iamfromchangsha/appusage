@@ -44,6 +44,7 @@ internal static class Program
 
         Tracker? tracker = null;
         ShotService? shots = null;
+        SingleInstance? single = null;
         try
         {
             var paths = AppPaths.Resolve(dataDir);
@@ -93,6 +94,26 @@ internal static class Program
 
             // 到这里才是真正的常驻运行：才允许开追踪和随机截图
             // （上面的命令行用法刻意不启动它们，免得一条调试命令就顺手截了屏）
+
+            // 单实例守卫：两个实例同时跑会把同一段时间记两遍，数据直接被污染。
+            // 第二个实例不报错退出，而是通知已有实例把主窗口显示出来
+            // （本机开机自启走托盘，双击 EXE 时托盘实例一定已经在跑）
+            single = new SingleInstance(paths.DataDir);
+            if (!single.IsPrimary)
+            {
+                var notified = single.NotifyShow();
+                single.Dispose();
+                single = null;
+                if (!notified)
+                {
+                    MessageBox.Show(
+                        "「应用使用时长」已经在运行了。\n看右下角托盘图标，双击它可以打开主界面。",
+                        "应用使用时长", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                return 0;
+            }
+            single.Listen();
+
             tracker = new Tracker(paths.LogDir, config);
             tracker.Start();
 
@@ -104,11 +125,13 @@ internal static class Program
             {
                 // 托盘常驻：主窗口按需创建，平时完全不构造那套界面，内存占用最低
                 var host = new TrayHost(store, tracker, config, paths);
+                using var pump = StartIpcPump(single, host.ShowMain);
                 Application.Run(new TrayContext(host));
             }
             else
             {
                 var form = new MainForm(store, tracker, config, paths);
+                using var pump = StartIpcPump(single, form.ShowMain);
                 Application.Run(form);
             }
         }
@@ -129,8 +152,29 @@ internal static class Program
         {
             shots?.Dispose();
             tracker?.Dispose();
+            single?.Dispose();
         }
         return 0;
+    }
+
+    /// <summary>
+    /// 把 IPC 请求搬到 UI 线程处理。
+    /// 命名管道的回调跑在后台线程上，直接动 WinForms 控件会炸。
+    /// </summary>
+    private static System.Windows.Forms.Timer StartIpcPump(SingleInstance single, Action showMain)
+    {
+        var timer = new System.Windows.Forms.Timer { Interval = 300 };
+        timer.Tick += (_, _) =>
+        {
+            while (single.TryTakeRequest(out var cmd))
+            {
+                if (cmd != "show") continue;
+                try { showMain(); }
+                catch (Exception ex) { Program.LogCrash(ex); }
+            }
+        };
+        timer.Start();
+        return timer;
     }
 
     internal static void Trace(string message)
