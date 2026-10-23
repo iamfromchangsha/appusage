@@ -30,7 +30,7 @@
   "ai": {
     "enabled": false,
     "base_url": "https://api.deepseek.com",
-    "api_key": "",
+    "api_key": ""（填你的 DeepSeek key，勿提交）,
     "model": "deepseek-v4-pro",
     "thinking": true,
     "include_topics": true,
@@ -41,7 +41,7 @@
     "enabled": false,
     "interval_minutes": 20,
     "max_per_day": 8,
-    "github_token": "",
+    "github_token": ""（填你的 GitHub PAT，勿提交）,
     "github_owner": "",
     "github_repo": "appusage-shots",
     "auto_create_repo": true,

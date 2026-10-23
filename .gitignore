@@ -11,6 +11,10 @@ data/
 *.db-shm
 *.log
 
+# ---- 含有 API Key / PAT 的本地配置（绝对不能提交）----
+config.json
+secrets.json
+
 # ---- Python 缓存 ----
 __pycache__/
 *.pyc

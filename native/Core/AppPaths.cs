@@ -17,20 +17,21 @@ internal sealed class AppPaths
 
         Directory.CreateDirectory(dataDir);
 
-        var configPath = Path.Combine(baseDir, "config.json");
-        if (!File.Exists(configPath))
+        // 配置文件优先级：exe 同级 → 上一级 → 仓库里的示例文件 → 数据目录
+        // （config.json 含 API Key / PAT，已被 .gitignore 排除，不要提交）
+        var candidates = new List<string>
         {
-            var parent = Path.GetDirectoryName(baseDir.TrimEnd(Path.DirectorySeparatorChar));
-            if (!string.IsNullOrEmpty(parent))
-            {
-                var alt = Path.Combine(parent, "config.json");
-                if (File.Exists(alt)) configPath = alt;
-            }
-        }
-        if (!File.Exists(configPath))
+            Path.Combine(baseDir, "config.json"),
+            Path.Combine(dataDir, "config.json"),
+        };
+        var parent = Path.GetDirectoryName(baseDir.TrimEnd(Path.DirectorySeparatorChar));
+        if (!string.IsNullOrEmpty(parent))
         {
-            configPath = Path.Combine(dataDir, "config.json");
+            candidates.Insert(1, Path.Combine(parent, "config.json"));
+            candidates.Add(Path.Combine(parent, "config.example.json"));
         }
+
+        var configPath = candidates.FirstOrDefault(File.Exists) ?? Path.Combine(dataDir, "config.json");
 
         return new AppPaths
         {

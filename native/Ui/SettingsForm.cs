@@ -135,6 +135,17 @@ internal sealed class SettingsForm : Form
         _ghStatus.Font = new Font("Segoe UI", 7.8f);
         grid.Controls.Add(_ghStatus, 1, 4);
 
+        var warn = new Label
+        {
+            Text = "Token 只保存在本机 config.json（已加入 .gitignore，不会被提交到仓库）；" +
+                   "随时可在 GitHub 设置里吊销。",
+            ForeColor = Theme.Muted2,
+            Font = new Font("Segoe UI", 7.6f),
+            AutoSize = false,
+            Dock = DockStyle.Fill,
+        };
+        grid.Controls.Add(warn, 0, 4);
+
         card.Content.Controls.Add(grid);
         return card;
     }
