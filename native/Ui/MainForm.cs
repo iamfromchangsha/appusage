@@ -456,7 +456,14 @@ internal sealed class MainForm : Form
             _store.Reload();
             bool changed = _store.Version != _lastVersion;
             _lastVersion = _store.Version;
-            if (changed) RefreshWidgets();
+            if (changed)
+            {
+                RefreshWidgets();
+                // 日报页开着就一起刷——它副标题写着「实时更新」，
+                // 不跟着刷的话数字会一直冻着，说的和做的不是一回事
+                if (_reportForm is { IsDisposed: false, Visible: true })
+                    _reportForm.RefreshIfToday();
+            }
             UpdateStatus();
         }
         catch (Exception ex) { _header.Status.Text = "刷新出错：" + ex.Message; }

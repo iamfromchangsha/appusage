@@ -337,6 +337,26 @@ internal sealed class ReportForm : Form
         RefreshReport();
     }
 
+    /// <summary>
+    /// 主界面发现数据更新时叫这个。
+    /// <para>
+    /// 日报页副标题写着「今天（实时更新）」，那就真得实时更新——
+    /// 之前只有翻页/切主题才会刷新，数字会一直冻着。
+    /// </para>
+    /// <para>
+    /// 但只有正在看「今天」才需要刷：历史日报不会再变，刷它是纯浪费。
+    /// </para>
+    /// </summary>
+    public void RefreshIfToday()
+    {
+        if (_date != DateTime.Today) return;
+        var before = _report.TotalSeconds;
+        RefreshReport();
+        // 只在数值真的变了才记一笔，免得每 20 秒写一行把 trace 撑爆
+        if (Math.Abs(_report.TotalSeconds - before) > 0.5)
+            Program.Trace($"report refresh {_date:yyyy-MM-dd} 总时长 {Fmt(_report.TotalSeconds)}");
+    }
+
     public void RefreshReport()
     {
         _store.Reload();

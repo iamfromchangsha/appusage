@@ -238,13 +238,21 @@ internal static class Program
         return timer;
     }
 
+    private static readonly object _logLock = new();
+    private const long MaxLogBytes = 2L * 1024 * 1024;
+
     internal static void Trace(string message)
     {
         try
         {
-            Directory.CreateDirectory(_dataDir);
-            File.AppendAllText(Path.Combine(_dataDir, "trace.log"),
-                $"{DateTime.Now:HH:mm:ss.fff}  {message}{Environment.NewLine}");
+            lock (_logLock)
+            {
+                Directory.CreateDirectory(_dataDir);
+                var path = Path.Combine(_dataDir, "trace.log");
+                RotateIfBig(path);
+                File.AppendAllText(path,
+                    $"{DateTime.Now:HH:mm:ss.fff}  {message}{Environment.NewLine}");
+            }
         }
         catch { /* ignore */ }
     }
@@ -255,12 +263,34 @@ internal static class Program
         if (ex is null) return;
         try
         {
-            Directory.CreateDirectory(_dataDir);
-            File.AppendAllText(Path.Combine(_dataDir, "error.log"),
-                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} 未捕获异常{Environment.NewLine}{ex}{Environment.NewLine}{new string('-', 60)}{Environment.NewLine}");
+            lock (_logLock)
+            {
+                Directory.CreateDirectory(_dataDir);
+                var path = Path.Combine(_dataDir, "error.log");
+                RotateIfBig(path);
+                File.AppendAllText(path,
+                    $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} 未捕获异常{Environment.NewLine}{ex}{Environment.NewLine}{new string('-', 60)}{Environment.NewLine}");
+            }
         }
         catch { /* ignore */ }
         Trace("CRASH: " + ex.Message);
+    }
+
+    /// <summary>
+    /// 日志按大小轮转：超过 2 MB 就把当前文件挪成 .1（只留一份旧的）。
+    /// 这两个文件是单文件追加、**不会**自己变小，常年开着就会一直涨。
+    /// </summary>
+    private static void RotateIfBig(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists || info.Length < MaxLogBytes) return;
+            var old = path + ".1";
+            try { if (File.Exists(old)) File.Delete(old); } catch { }
+            File.Move(path, old);
+        }
+        catch { /* ignore */ }
     }
 }
 
