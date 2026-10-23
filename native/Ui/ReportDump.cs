@@ -24,7 +24,8 @@ internal static class ReportDump
         sb.AppendLine($"昨日       : {Fmt(r.YesterdaySeconds)}");
         sb.AppendLine($"周均       : {(r.WeekSampleDays >= 2 ? Fmt(r.WeekAvgSeconds) : "样本不足")}（{r.WeekSampleDays} 个有记录日）");
         sb.AppendLine($"首次/末次  : {r.FirstActive:HH:mm} / {r.LastActive:HH:mm}");
-        sb.AppendLine($"专注度     : {r.Sessions} 段 / {r.Switches} 次切换 / 最长连续 {Fmt(r.LongestSessionSeconds)} / 碎片率 {r.FragmentRate:P0}");
+        sb.AppendLine($"专注度     : {r.Sessions} 段 / {r.Switches} 次切换 / 最长连续 {Fmt(r.LongestSessionSeconds)} / 碎片率 {r.FragmentRate:P0}" +
+                    (r.Pauses > 0 ? $"（另有 {r.Pauses} 段是离开后回来，不算切换）" : ""));
         sb.AppendLine();
 
         sb.AppendLine("--- 使用构成 ---");

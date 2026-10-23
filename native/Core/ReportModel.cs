@@ -58,6 +58,10 @@ internal sealed class ReportData
 
     public int Sessions;
     public int Switches;
+
+    /// <summary>「人离开了又回来用同一个应用」的次数——这不是切换，是暂停。</summary>
+    public int Pauses;
+
     public double LongestSessionSeconds;
     public double FragmentRate;          // 0~1
 

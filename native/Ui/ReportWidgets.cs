@@ -139,15 +139,20 @@ internal sealed class TopicList : Control
 
             // 时长
             using (var b = new SolidBrush(Theme.Accent2))
-                g.DrawString(FormatDuration(item.Seconds), small, b, Width - durW, y + Dpi.Px(6));
+                g.DrawString(Dur.Short(item.Seconds), small, b, Width - durW, y + Dpi.Px(6));
 
             y += rowH;
         }
     }
 
     private static string Trim(string s, int n) => s.Length <= n ? s : s[..n] + "…";
+}
 
-    private static string FormatDuration(double seconds)
+/// <summary>时长的统一格式化（全 App 一个口径，别各处各写一遍）。</summary>
+internal static class Dur
+{
+    /// <summary>紧凑版：<c>1h05m</c> / <c>53 分</c> / <c>40 秒</c>。</summary>
+    public static string Short(double seconds)
     {
         var s = (long)Math.Round(Math.Max(0, seconds));
         var h = s / 3600;
@@ -211,7 +216,7 @@ internal sealed class SiteList : Control
                 g.FillRectangle(b, barX, y + Dpi.Px(6), (int)Math.Max(2, item.Seconds / max * barW), barH);
 
             using (var b = new SolidBrush(Theme.Muted))
-                g.DrawString($"{item.Seconds / 60:0} 分", font, b, Width - Dpi.Px(52), y + Dpi.Px(3));
+                g.DrawString(Dur.Short(item.Seconds), font, b, Width - Dpi.Px(52), y + Dpi.Px(3));
 
             y += rowH;
         }

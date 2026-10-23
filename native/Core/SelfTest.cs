@@ -38,6 +38,7 @@ internal static class SelfTest
             TestDocumentTitle();
             TestTokenExtract();
             TestMergeSegments();
+        TestSwitchVsPause();
             TestSplitByDay();
             TestStoreParsing();
             TestStoreMultiFilePartial();
@@ -220,6 +221,48 @@ internal static class SelfTest
         // 同应用但间隔 90 秒 → 2 段
         var segs3 = new List<Seg> { new("edge", t0, 20), new("edge", t0 + 110, 20) };
         Check(ReportBuilder.MergeSegments(segs3).Count == 2, "间隔 >60s → 断开成 2 段");
+    }
+
+    /// <summary>
+    /// 回归：「应用切换次数」只算应用真的变了的情况。
+    /// 「人离开了（空闲 90 秒以上）又回来用同一个应用」是暂停，不是切换。
+    /// </summary>
+    private static void TestSwitchVsPause()
+    {
+        Console.WriteLine("— 切换 vs 暂停 —");
+        var dir = Path.Combine(Path.GetTempPath(), "appusage_selftest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            double baseTs = DateTimeOffset.Now.AddHours(-2).ToUnixTimeMilliseconds() / 1000.0;
+            // 一天之内：A 用 60 秒 → 离开 10 分钟 → A 再用 60 秒 → B 用 60 秒
+            // 合并后是 3 段：A / A / B
+            // → 真正的「换应用」只有 1 次（A→B），中间那次是暂停
+            var t = baseTs;
+            var lines = new List<string>();
+            void Add(string app, double start, double dur) =>
+                lines.Add($"{app}\tC:\\x\\{app}.exe\t标题\t{start:F3}\t{start + dur:F3}\t{dur:F3}");
+
+            Add("a", t, 60);
+            t += 60 + 600;          // 离开 10 分钟
+            Add("a", t, 60);
+            t += 60;
+            Add("b", t, 60);
+
+            File.WriteAllText(Path.Combine(dir, "x.log"), string.Join("\n", lines) + "\n");
+
+            var store = new Store(dir, new Config());
+            store.Reload();
+            var report = ReportBuilder.Build(store, new Config(), DateTime.Today, DateTime.Today);
+
+            Eq(3, report.Sessions, "合并后 3 段");
+            Eq(1, report.Switches, "真正的应用切换只有 1 次（A→B）");
+            Eq(1, report.Pauses, "「离开又回到同一个应用」算暂停，不算切换");
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { }
+        }
     }
 
     /// <summary>跨零点的使用必须拆成自然日，否则那几十秒会整段落进前一天。</summary>

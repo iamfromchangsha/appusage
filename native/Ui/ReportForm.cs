@@ -379,11 +379,14 @@ internal sealed class ReportForm : Form
 
         _focus[1].Label = "应用切换次数";
         _focus[1].Value = _report.Switches.ToString();
-        _focus[1].Sub = _report.Sessions > 0 ? $"平均每段 {Fmt(_report.TotalSeconds / Math.Max(1, _report.Sessions))}" : "—";
+        // 副标题只有一行、放不下长句，用最简的说法
+        _focus[1].Sub = _report.Pauses > 0
+            ? $"{_report.Pauses} 段暂停"
+            : (_report.Sessions > 0 ? $"平均每段 {Fmt(_report.TotalSeconds / Math.Max(1, _report.Sessions))}" : "—");
 
         _focus[2].Label = "碎片率";
         _focus[2].Value = $"{_report.FragmentRate:P0}";
-        _focus[2].Sub = "越低说明越专注";
+        _focus[2].Sub = "越低越专注";
 
         // 构成 / 主题
         _catBar.SetItems(_report.Categories);

@@ -252,7 +252,8 @@ internal sealed class AiClient : IDisposable
             sb.AppendLine("主要访问站点：" + string.Join("、",
                 r.Sites.Take(6).Select(s => $"{s.Name} {Fmt(s.Seconds)}")));
 
-        sb.AppendLine($"专注度：共 {r.Sessions} 段使用，切换 {r.Switches} 次，最长连续 {Fmt(r.LongestSessionSeconds)}，碎片率 {r.FragmentRate:P0}");
+        sb.AppendLine($"专注度：共 {r.Sessions} 段使用，切换 {r.Switches} 次，最长连续 {Fmt(r.LongestSessionSeconds)}，碎片率 {r.FragmentRate:P0}" +
+                    (r.Pauses > 0 ? $"（其中 {r.Pauses} 段是中途离开后又回到同一个应用，不算切换）" : ""));
 
         if (_config.Ai.IncludeTopics && r.Topics.Count > 0)
         {

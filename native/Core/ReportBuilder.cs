@@ -61,7 +61,20 @@ internal static class ReportBuilder
         var segs = store.SegmentsFor(day);
         var runs = MergeSegments(segs);
         data.Sessions = runs.Count;
-        data.Switches = Math.Max(0, runs.Count - 1);
+
+        // 「应用切换次数」只算**应用真的变了**的次数。
+        // 「人离开了（空闲 90 秒以上）又回来用同一个应用」不是切换，是暂停——
+        // 之前把这种也算进去，切换次数会虚高（实测某天多算了 17 次）。
+        data.Switches = 0;
+        data.Pauses = 0;
+        for (int i = 1; i < runs.Count; i++)
+        {
+            if (string.Equals(runs[i - 1].AppKey, runs[i].AppKey, StringComparison.Ordinal))
+                data.Pauses++;
+            else
+                data.Switches++;
+        }
+
         double longest = 0;
         DateTime? first = null, last = null;
         foreach (var s in segs)

@@ -53,7 +53,14 @@ internal sealed class StatCard : Panel
 
         using (var f = new Font("Segoe UI", 7.8f))
         using (var b = new SolidBrush(Theme.Muted2))
-            g.DrawString(Sub, f, b, pad, Math.Max(0, Height - Dpi.Px(24)));
+        {
+            // 用 TextRenderer + 省略号：DrawString 超出卡片宽度是**硬切**（半个字），
+            // 这里让长文案优雅降级成「…」
+            TextRenderer.DrawText(g, Sub, f,
+                new Rectangle(pad, Math.Max(0, Height - Dpi.Px(24)), Math.Max(10, Width - pad - Dpi.Px(8)), Dpi.Px(16)),
+                Theme.Muted2,
+                TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+        }
     }
 }
 
