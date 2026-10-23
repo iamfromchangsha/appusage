@@ -41,6 +41,8 @@ internal static class SelfTest
             TestReportAssembly();
             TestConfigRoundTrip();
             TestShotPathFormat();
+        TestShotNaming();
+        TestShotIndexLookup();
 
             Console.WriteLine();
             Console.WriteLine($"自测完成：{_pass} 通过，{_fails.Count} 失败");
@@ -358,5 +360,100 @@ internal static class SelfTest
         var path = $"shots/{d:yyyy}/{d:MM}/{d:dd}/{d:HH-mm-ss}_edge.jpg";
         Check(path.Contains("/23/"), "日期目录用小写 dd（输出 23 而不是字面量 DD）", path);
         Check(!path.Contains("/DD/"), "不再出现字面量 DD");
+    }
+
+    /// <summary>
+    /// 截图链路的命名约定：原始名 / GitHub 路径 / outbox 文件名 / 清单键名必须对得上。
+    /// 早期 outbox 补传把日期前缀写进了路径和键名，日报里就显示成「未上传」。
+    /// </summary>
+    private static void TestShotNaming()
+    {
+        Console.WriteLine("— 截图命名约定 —");
+
+        var at = new DateTime(2026, 10, 23, 15, 4, 5);
+        const string name = "15-04-05_msedge";
+
+        // GitHub 路径：日期目录必须是小写 dd
+        var rel = ShotService.RelPath(at, name);
+        Eq("shots/2026/10/23/15-04-05_msedge.jpg", rel, "GitHub 相对路径");
+        Check(!rel.Contains("/DD/"), "GitHub 路径里没有字面量 DD");
+
+        // outbox 文件名带日期前缀，补传时要还原成原始名
+        var (parsedAt, parsedName) = ShotService.ParseOutboxName("2026-10-23_15-04-05_msedge.jpg");
+        Eq(name, parsedName, "outbox 文件名还原出原始名");
+        Eq(at, parsedAt, "outbox 文件名还原出拍摄时间");
+
+        // 还原出来的路径必须和直传完全一致（这是这次修的核心）
+        Eq(rel, ShotService.RelPath(parsedAt, parsedName), "补传路径 == 直传路径");
+
+        // 清单键名统一是原始名
+        Eq(name, ShotService.NormalizeName("2026-10-23_15-04-05_msedge"), "日期前缀从键名里剥掉");
+        Eq(name, ShotService.NormalizeName(name), "没有前缀就原样返回");
+        Eq("foo_bar", ShotService.NormalizeName("foo_bar"), "非日期前缀不动");
+    }
+
+    /// <summary>
+    /// 回归：清单的键必须和缩略图文件名对得上，否则日报里点不开 GitHub 原图。
+    /// 早期 outbox 补传把日期前缀写进了键名，这里专门盯住这一点。
+    /// </summary>
+    private static void TestShotIndexLookup()
+    {
+        Console.WriteLine("— 截图清单匹配 —");
+        var dir = Path.Combine(Path.GetTempPath(), "appusage_selftest_" + Guid.NewGuid().ToString("N"));
+        var day = new DateTime(2026, 10, 23);
+        try
+        {
+            var thumbDir = Path.Combine(dir, "shots", "thumbs", day.ToString("yyyy-MM-dd"));
+            Directory.CreateDirectory(thumbDir);
+            // 造两个缩略图
+            File.WriteAllBytes(Path.Combine(thumbDir, "12-29-31_msedge.jpg"), new byte[] { 1, 2, 3 });
+            File.WriteAllBytes(Path.Combine(thumbDir, "11-33-29_msedge.jpg"), new byte[] { 1, 2, 3 });
+
+            // 清单里一个是规范键名，一个是带日期前缀的历史脏键名
+            var manifest = Path.Combine(dir, "shots", "index.tsv");
+            Directory.CreateDirectory(Path.GetDirectoryName(manifest)!);
+            var dirty = new[]
+            {
+                "12-29-31_msedge\tshots/2026/10/23/12-29-31_msedge.jpg",
+                "2026-10-23_11-33-29_msedge\tshots/2026/10/23/2026-10-23_11-33-29_msedge.jpg",
+            };
+            File.WriteAllText(manifest, string.Join("\n", dirty) + "\n");
+
+            var config = new Config();
+            config.Shots.GithubOwner = "me";
+            config.Shots.GithubRepo = "shots";
+            config.Shots.GithubToken = "github_pat_x";
+
+            // 迁移前：带日期前缀的脏键名认不出来（这正是那个 bug）
+            var before = ShotIndex.ForDay(dir, day, config);
+            var legacy = before.FirstOrDefault(r => r.At.TimeOfDay == new TimeSpan(11, 33, 29));
+            Check(legacy is not null, "找到 11-33-29 那张");
+            Check(!legacy!.Uploaded, "迁移前：脏键名认不出 → 显示未上传（就是那个 bug）");
+
+            // 迁移：键名和路径都还原成规范形式
+            var (lines, changed) = ShotService.NormalizeManifestLines(dirty);
+            Check(changed, "迁移检测到清单需要修正");
+            Check(lines.Any(l => l.StartsWith("11-33-29_msedge\tshots/2026/10/23/11-33-29_msedge.jpg", StringComparison.Ordinal)),
+                "迁移后键名和路径都去掉日期前缀", string.Join(" | ", lines));
+
+            // 迁移后：清单与缩略图名对得上，GitHub 链接指向规范路径
+            File.WriteAllText(manifest, string.Join("\n", lines) + "\n");
+            var after = ShotIndex.ForDay(dir, day, config);
+            Eq(2, after.Count, "两天两张缩略图都在");
+
+            var good = after.FirstOrDefault(r => r.At.TimeOfDay == new TimeSpan(12, 29, 31));
+            Check(good is not null, "找到 12-29-31 那张");
+            Check(good!.Uploaded, "规范键名 → 认得出已上传");
+            Check(good.GithubUrl.Contains("shots/2026/10/23/12-29-31_msedge.jpg"), "GitHub 链接指向规范路径", good.GithubUrl);
+
+            var fixedLegacy = after.FirstOrDefault(r => r.At.TimeOfDay == new TimeSpan(11, 33, 29));
+            Check(fixedLegacy!.Uploaded, "迁移后：脏键名也能认出来了");
+            Check(fixedLegacy.GithubUrl.Contains("shots/2026/10/23/11-33-29_msedge.jpg"),
+                "迁移后的链接指向规范路径", fixedLegacy.GithubUrl);
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { }
+        }
     }
 }

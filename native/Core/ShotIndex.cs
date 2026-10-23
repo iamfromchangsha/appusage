@@ -58,9 +58,6 @@ internal static class ShotIndex
         return $"https://github.com/{s.GithubOwner}/{s.GithubRepo}/blob/main/{relPath}";
     }
 
-    public static string RelPath(DateTime day, string name) =>
-        $"shots/{day:yyyy}/{day:MM}/{day:DD}/{name}.jpg";
-
     private static TimeSpan ParseTime(string s)
     {
         if (TimeSpan.TryParseExact(s, @"hh\-mm\-ss", null, out var t)) return t;

@@ -15,6 +15,7 @@ internal static class Program
         // 本程序是 WinExe，默认没有控制台，先挂到父进程的控制台上。
         bool cliMode = args.Any(a =>
             a.Equals("--selftest", StringComparison.OrdinalIgnoreCase) ||
+            a.Equals("--memcheck", StringComparison.OrdinalIgnoreCase) ||
             a.Equals("--dump", StringComparison.OrdinalIgnoreCase) ||
             a.Equals("--test-shot", StringComparison.OrdinalIgnoreCase));
         if (cliMode) ConsoleHost.Attach();
@@ -58,6 +59,16 @@ internal static class Program
             if (args.Any(a => a.Equals("--selftest", StringComparison.OrdinalIgnoreCase)))
             {
                 return SelfTest.Run(Path.Combine(paths.DataDir, "selftest.txt"));
+            }
+
+            // 内存体检：--memcheck [天数] 造合成日志，量 Store 的内存占用
+            int memIdx = Array.FindIndex(args, a => a.Equals("--memcheck", StringComparison.OrdinalIgnoreCase));
+            if (memIdx >= 0)
+            {
+                int memDays = 30;
+                if (memIdx + 1 < args.Length && int.TryParse(args[memIdx + 1], out var parsed))
+                    memDays = parsed;
+                return MemCheck.Run(memDays);
             }
 
             // 调试用：--test-shot 抓一张当前前台窗口的图，验证截图链路

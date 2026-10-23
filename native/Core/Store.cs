@@ -37,6 +37,9 @@ internal sealed class Store
     /// <summary>数据版本号：有新数据进来才 +1，UI 据此决定要不要重建。</summary>
     public int Version { get; private set; }
 
+    /// <summary>上次算窗口指标时是哪一天（跨零点要重算一次）。</summary>
+    private DateTime _windowDay = DateTime.MinValue;
+
     /// <summary>读取日志里新增的行并更新聚合（支持按天分片的多个文件）。</summary>
     public void Reload()
     {
@@ -88,7 +91,16 @@ internal sealed class Store
             catch { /* 日志正在被写，读失败就下一轮再读 */ }
 
             if (changed) Version++;
-            RecomputeWindows();
+
+            // 窗口指标（今日 / 近7天 / 近30天）只在「有新数据」或「跨了零点」时重算。
+            // UI 每 3 秒调一次 Reload，无条件重算等于每 3 秒把所有历史天都走一遍，
+            // 攒得越久越贵。
+            var today = DateTime.Today;
+            if (changed || today != _windowDay)
+            {
+                _windowDay = today;
+                RecomputeWindows();
+            }
         }
     }
 
