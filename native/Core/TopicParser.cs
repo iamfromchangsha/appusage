@@ -46,17 +46,29 @@ internal sealed class TopicParser
 
     private readonly Config _config;
     private readonly Dictionary<string, TopicInfo> _cache = new(StringComparer.Ordinal);
-    private readonly List<KeyValuePair<string, string>> _siteHints;
-
+    private List<KeyValuePair<string, string>> _siteHints;
     public TopicParser(Config config)
     {
         _config = config;
-        _siteHints = CategoryMap.DefaultSiteHints
+        _siteHints = BuildHints(config);
+    }
+
+    private static List<KeyValuePair<string, string>> BuildHints(Config config) =>
+        CategoryMap.DefaultSiteHints
             .Concat(config.SiteHints ?? new Dictionary<string, string>())
             .GroupBy(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase)
             .Select(g => new KeyValuePair<string, string>(g.Key, g.First()))
             .OrderByDescending(kv => kv.Key.Length)
             .ToList();
+
+    /// <summary>
+    /// 词表改了之后要重新构建。
+    /// 站点是在**读取日志时**算出来的，不重建的话新加的词条不会生效。
+    /// </summary>
+    public void RefreshHints()
+    {
+        _siteHints = BuildHints(_config);
+        _cache.Clear();
     }
 
     /// <summary>解析一个原始窗口标题（带缓存，同一标题只算一次）。</summary>
@@ -106,23 +118,32 @@ internal sealed class TopicParser
             break;
         }
 
+        // 剥尾部之前留两份原文：站点名常常就在被剥掉的那段里
+        // （Edge 的「页面标题 - 站点名」「xxx - 搜索」「xxx - 知乎」）
+        var siteSourceFull = s;
+
         // 浏览器配置文件名
         if (isBrowser)
         {
             s = ProfilePersonal.Replace(s, string.Empty).Trim();
             s = ProfileNamed.Replace(s, string.Empty).Trim();
+            var siteSourceAfterProfile = s;
             // 剩下的「 - xxx」按配置文件处理（Chrome 的个人资料名可能是任意文字）
             var dash = s.LastIndexOf(" - ", StringComparison.Ordinal);
             if (dash > 0 && s.Length - dash <= 26) s = s[..dash].Trim();
+
+            // 站点识别：先用**剥之前**的标题，剥干净的当兜底。
+            // 反过来做的话，「xxx - 知乎」会先被剥成「xxx」，站点就再也认不出来了。
+            var site = SiteOf(siteSourceFull);
+            if (site.Length == 0) site = SiteOf(siteSourceAfterProfile);
+            if (site.Length == 0) site = SiteOf(s);
+            var siteName = site.Length > 0 ? SiteNameOf(site) : string.Empty;
+            return new TopicInfo(s, TopicKind.Web, site, siteName);
         }
 
         if (kind != TopicKind.Document && DocExt.IsMatch(s)) kind = TopicKind.Document;
-        if (isBrowser) kind = TopicKind.Web;
         if (kind == TopicKind.App && s.Length == 0) kind = TopicKind.Unknown;
-
-        var site = kind == TopicKind.Web ? SiteOf(s) : string.Empty;
-        var siteName = site.Length > 0 ? SiteNameOf(site) : string.Empty;
-        return new TopicInfo(s, kind, site, siteName);
+        return new TopicInfo(s, kind, string.Empty, string.Empty);
     }
 
     /// <summary>去零宽 / 不可见字符、折叠空白。</summary>

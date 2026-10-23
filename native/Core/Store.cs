@@ -182,6 +182,27 @@ internal sealed class Store
         TotalSeconds += duration;
     }
 
+    /// <summary>
+    /// 整个重算：清空聚合，从日志重新读一遍。
+    /// 改了「站点关键词」这类解析规则后必须重算——
+    /// 站点是**读取时**算出来的，不重算的话新规则不生效。
+    /// </summary>
+    public void Rebuild()
+    {
+        lock (_sync)
+        {
+            Days.Clear();
+            Apps.Clear();
+            TotalSeconds = 0;
+            ActiveDays = 0;
+            Version = 0;
+            _fileOffsets.Clear();
+            _windowDay = DateTime.MinValue;
+            _topics.RefreshHints();
+        }
+        Reload();
+    }
+
     /// <summary>重算「今日 / 近7天 / 近30天」这类窗口指标。</summary>
     private void RecomputeWindows()
     {

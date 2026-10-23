@@ -32,6 +32,9 @@ internal static class SelfTest
             TestCleanTitle();
             TestStripBrowserSuffix();
             TestSiteDetection();
+        TestSiteFromStrippedSuffix();
+        TestSiteHintsCodec();
+        TestSiteHintsRebuild();
             TestDocumentTitle();
             TestTokenExtract();
             TestMergeSegments();
@@ -120,6 +123,36 @@ internal static class SelfTest
         var t5 = p.Parse("MiniMax Code");
         Eq("MiniMax Code", t5.Text, "普通应用标题原样保留");
         Check(t5.Kind == TopicKind.App, "应用标题判为 App");
+    }
+
+    /// <summary>
+    /// 回归：Edge 的窗口标题常常是「页面标题 - 站点名」，
+    /// 而站点名会在剥尾部时被一起去掉——站点识别必须在**剥之前**做，
+    /// 否则「xxx - 知乎」会变成「未识别站点」。
+    /// </summary>
+    private static void TestSiteFromStrippedSuffix()
+    {
+        Console.WriteLine("— 站点名在尾部时也能认出 —");
+        var p = new TopicParser(new Config());
+
+        // 真实标题（Edge，多标签 + 个人资料 2）
+        var t1 = p.Parse("如何理解唯物辩证法的“两点论”和“重点论”的统一 - 知乎 和另外 8 个页面 - 个人 2 - Microsoft Edge");
+        Eq("如何理解唯物辩证法的“两点论”和“重点论”的统一", t1.Text, "尾部被剥掉");
+        Check(t1.Kind == TopicKind.Web, "判为 Web");
+        Check(t1.Site == "zhihu.com", "站点名在尾部也要认得出", t1.Site);
+
+        // 更具体的关键词优先于更泛的
+        Eq("tieba.baidu.com", p.SiteOf("已按约定将补丁修改-百度贴吧"), "百度贴吧 → tieba.baidu.com");
+        Eq("baike.baidu.com", p.SiteOf("桃乃木香奈_百度百科"), "百度百科 → baike.baidu.com");
+        Eq("baidu.com", p.SiteOf("随便一个百度"), "只有「百度」→ baidu.com");
+
+        // 剥之前能认出来的，剥之后也要认得（这里是真实数据里出现过的形态）
+        var t2 = p.Parse("滑稽贴吧 - 搜索 - 个人 2 - Microsoft Edge");
+        Eq("滑稽贴吧", t2.Text, "Edge 搜索页也剥掉尾部");
+
+        // 剥尾部不能把普通应用标题弄坏
+        var t3 = p.Parse("DeepSeek - 探索未至之境 - 个人 2 - Microsoft Edge");
+        Eq("DeepSeek", t3.Text, "浏览器标题剥尾部");
     }
 
     private static void TestSiteDetection()
@@ -459,6 +492,77 @@ internal static class SelfTest
         // choices 为空
         var noChoice = AiClient.ParseChatResponse("""{"choices":[]}""");
         Check(noChoice.Error is not null && noChoice.Error.Contains("空"), "choices 为空时报空", noChoice.Error ?? "");
+    }
+
+    /// <summary>
+    /// 回归：改了「站点关键词」之后，已经聚合过的站点必须重算，
+    /// 否则用户加了词条、日报里还是「未识别站点」。
+    /// </summary>
+    private static void TestSiteHintsRebuild()
+    {
+        Console.WriteLine("— 站点词表改动后重算 —");
+        var dir = Path.Combine(Path.GetTempPath(), "appusage_selftest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            double t = DateTimeOffset.Now.AddHours(-1).ToUnixTimeMilliseconds() / 1000.0;
+            File.WriteAllText(Path.Combine(dir, "2026-01-01.log"),
+                $"msedge\tC:\\e\\msedge.exe\t小红书创作服务平台 - Google Chrome\t{t:F3}\t{t + 60:F3}\t60.000\n");
+
+            var config = new Config();
+            var store = new Store(dir, config);
+            store.Reload();
+
+            var before = store.SitesFor(DateTime.Today);
+            Check(!before.Any(s => s.Site == "xiaohongshu.com"), "没配词表时认不出（预期内）");
+
+            // 用户在设置里加了词条
+            config.SiteHints["小红书"] = "xiaohongshu.com";
+            config.SiteNames["xiaohongshu.com"] = "小红书";
+            store.Rebuild();
+
+            var after = store.SitesFor(DateTime.Today);
+            Check(after.Any(s => s.Site == "xiaohongshu.com"), "加了词条并重建后认出来了");
+            Check(after.Any(s => s.Name == "小红书"), "显示名也用上了");
+            Eq(60, store.Days.Values.Sum(d => d.Total), "重建后总时长不变");
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { }
+        }
+    }
+
+    /// <summary>站点词表的文本编解码（用户手写，格式错了会静默丢数据）。</summary>
+    private static void TestSiteHintsCodec()
+    {
+        Console.WriteLine("— 站点词表编解码 —");
+        var lines = new[]
+        {
+            "# 这是注释",
+            "",
+            "小红书=xiaohongshu.com=小红书",
+            "  知乎 = zhihu.com  ",
+            "只有关键词没有等号",
+            "域名没有点=notadomain",
+            "带空格=bad domain.com",
+        };
+
+        var (hints, names) = SiteHintsCodec.Parse(lines);
+        Eq(2, hints.Count, "只解析出 2 条合法规则");
+        Check(hints.ContainsKey("小红书"), "中文关键词");
+        Check(hints.TryGetValue("小红书", out var site) && site == "xiaohongshu.com", "域名原样", site ?? "");
+        Check(names.TryGetValue("xiaohongshu.com", out var name) && name == "小红书", "中文显示名");
+        Check(hints.ContainsKey("知乎"), "首尾空格被去掉");
+        Check(!hints.ContainsKey("只有关键词没有等号"), "没有等号的行被跳过");
+        Check(!hints.ContainsKey("域名没有点"), "域名不合法被跳过");
+        Check(!hints.ContainsKey("带空格"), "域名带空格被跳过");
+
+        // 往返
+        var text = SiteHintsCodec.Format(hints, names);
+        var (h2, n2) = SiteHintsCodec.Parse(text);
+        Eq(hints.Count, h2.Count, "往返后条数不变");
+        Check(h2.TryGetValue("小红书", out var site2) && site2 == "xiaohongshu.com", "往返后内容不变");
+        Check(n2.TryGetValue("xiaohongshu.com", out var name2) && name2 == "小红书", "往返后显示名不变");
     }
 
     /// <summary>

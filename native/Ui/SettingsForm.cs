@@ -188,6 +188,17 @@ internal sealed class SettingsForm : Form
         return card;
     }
 
+        /// <summary>把关键控件的屏幕坐标写进 trace.log（自动化验证用）。</summary>
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        try
+        {
+            Program.Trace($"settings shown hwnd = {Handle}");
+        }
+        catch { /* ignore */ }
+    }
+
     private Control BuildButtons()
     {
         var panel = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
@@ -205,6 +216,13 @@ internal sealed class SettingsForm : Form
         cancel.Size = new Size(P(72), P(30));
         cancel.Location = new Point(panel.Width - P(180), P(8));
         cancel.Click += (_, _) => { DialogResult = DialogResult.Cancel; Close(); };
+
+        // 站点词表：内置表覆盖不到的那些站点（报告显示「未识别站点」的那些）在这里补
+        var sites = MakeButton("站点关键词…");
+        sites.Size = new Size(P(104), P(30));
+        sites.Location = new Point(P(0), P(8));
+        sites.Click += (_, _) => EditSiteHints();
+
         panel.Resize += (_, _) =>
         {
             save.Location = new Point(panel.ClientSize.Width - P(100), P(8));
@@ -212,7 +230,31 @@ internal sealed class SettingsForm : Form
         };
         panel.Controls.Add(save);
         panel.Controls.Add(cancel);
+        panel.Controls.Add(sites);
+
+        // 自动化验证用：把按钮的屏幕坐标写进 trace
+        panel.HandleCreated += (_, _) =>
+        {
+            try
+            {
+                var sp = sites.PointToScreen(new Point(sites.Width / 2, sites.Height / 2));
+                Program.Trace($"settings site hints button screen = {sp.X},{sp.Y}");
+            }
+            catch { /* ignore */ }
+        };
         return panel;
+    }
+
+    /// <summary>弹出站点关键词编辑器，结果写回 config（保存时才落盘）。</summary>
+    private void EditSiteHints()
+    {
+        using var dlg = new SiteHintsForm(
+            _config.SiteHints ?? new Dictionary<string, string>(),
+            _config.SiteNames ?? new Dictionary<string, string>());
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        var (hints, names) = dlg.Result;
+        _config.SiteHints = hints;
+        _config.SiteNames = names;
     }
 
     private void AddRow(TableLayoutPanel grid, int row, string label, Control control)

@@ -32,7 +32,6 @@ internal static class CategoryMap
         ["dotnet"] = "编程",
         ["msbuild"] = "编程",
         ["cl"] = "编程",
-        ["devenv"] = "编程",
         ["wechatdevtools"] = "编程",
         ["minimaxcode"] = "编程",
         ["claudebiu"] = "编程",
@@ -135,6 +134,9 @@ internal static class CategoryMap
         ["京东"] = "jd.com",
         ["百度"] = "baidu.com",
         ["baidu"] = "baidu.com",
+        // 更具体的优先（按关键词长度降序匹配，「百度贴吧」比「百度」先命中）
+        ["百度贴吧"] = "tieba.baidu.com",
+        ["百度百科"] = "baike.baidu.com",
         ["粉笔"] = "fenbi.com",
         ["fenbi"] = "fenbi.com",
         // 粉笔系的特征词：标题里通常没有「粉笔」两个字，靠这张表兜住
@@ -162,6 +164,8 @@ internal static class CategoryMap
         ["taobao.com"] = "淘宝",
         ["jd.com"] = "京东",
         ["baidu.com"] = "百度",
+        ["tieba.baidu.com"] = "百度贴吧",
+        ["baike.baidu.com"] = "百度百科",
     };
 
     /// <summary>合并后的分类表：用户配置优先。</summary>

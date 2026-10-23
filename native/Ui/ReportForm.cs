@@ -464,6 +464,8 @@ internal sealed class ReportForm : Form
         if (dlg.ShowDialog(this) == DialogResult.OK)
         {
             SyncAiState();
+            // 站点关键词可能改了 → 站点是读取日志时算的，得整个重算
+            _store.Rebuild();
             RefreshReport();
         }
     }
