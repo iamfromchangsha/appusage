@@ -36,6 +36,7 @@ internal static class SelfTest
         TestSiteHintsCodec();
         TestAppSorting();
         TestSlantButtonState();
+        TestConfigDurability();
         TestSiteHintsRebuild();
             TestDocumentTitle();
             TestTokenExtract();
@@ -693,6 +694,61 @@ internal static class SelfTest
 
         b.Selected = true;
         Check(b.Selected, "选中态由外部设置才生效");
+    }
+
+    /// <summary>
+    /// 回归：配置文件里存着 API Key 和 GitHub PAT，写坏了就是全丢。
+    /// 现在保存走原子替换（写临时文件再整体换），并留一份 .bak；
+    /// 主文件解析失败时自动从备份恢复。
+    /// </summary>
+    private static void TestConfigDurability()
+    {
+        Console.WriteLine("— 配置文件的耐久性 —");
+        var dir = Path.Combine(Path.GetTempPath(), "appusage_selftest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var path = Path.Combine(dir, "config.json");
+
+            var cfg = new Config();
+            cfg.Ai.ApiKey = "sk-test-key";
+            cfg.Shots.GithubToken = "github_pat_test";
+            cfg.SiteHints["小红书"] = "xiaohongshu.com";
+            cfg.Save(path);
+            Check(File.Exists(path), "第一次保存生成配置文件");
+            Check(!File.Exists(path + ".tmp"), "不留临时文件");
+
+            // 改一次 → 应该留下 .bak
+            cfg.Ai.ApiKey = "sk-new-key";
+            cfg.Save(path);
+            Check(File.Exists(path + ".bak"), "再次保存会留一份 .bak");
+
+            // 读回来
+            var back = Config.Load(path);
+            Eq("sk-new-key", back.Ai.ApiKey, "配置往返一致");
+            Eq("xiaohongshu.com", back.SiteHints.GetValueOrDefault("小红书", ""), "站点词表也在");
+
+            // 把主文件写坏 → 应该自动从备份恢复，而不是静默退回默认值（那等于把 PAT 丢了）
+            File.WriteAllText(path, "{ 这不是合法 JSON ");
+            var recovered = Config.Load(path);
+            Eq("sk-test-key", recovered.Ai.ApiKey, "主文件坏了 → 从备份恢复出上一版");
+            Check(!File.Exists(path + ".tmp"), "恢复后没有残留临时文件");
+            Check(File.Exists(path + ".corrupt"), "坏掉的主文件留成 .corrupt 备查");
+            Check(!File.Exists(path + ".bak") || File.ReadAllText(path + ".bak").Contains("sk-test-key"),
+                "恢复过程没有把好备份覆盖成坏文件");
+            Check(File.ReadAllText(path).Contains("sk-test-key"), "主文件被修好了");
+
+            // 主文件和备份都坏了 → 只能退回默认值，但不能把原文件覆盖掉
+            File.WriteAllText(path + ".bak", "也是坏的");
+            File.WriteAllText(path, "还是坏的");
+            var fallback = Config.Load(path);
+            Eq(string.Empty, fallback.Ai.ApiKey, "主文件和备份都坏时退回默认值");
+            Check(File.ReadAllText(path).Contains("还是坏的"), "坏掉的主文件被原样保留，没有被覆盖");
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { }
+        }
     }
 
     /// <summary>

@@ -13,6 +13,10 @@ data/
 
 # ---- 含有 API Key / PAT 的本地配置（绝对不能提交）----
 config.json
+# 配置的备份 / 临时 / 恢复文件里同样有密钥，一个都不能漏
+config.json.*
+*.bak
+*.tmp
 secrets.json
 
 # ---- Python 缓存 ----

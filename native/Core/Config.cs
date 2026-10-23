@@ -68,24 +68,74 @@ internal sealed class Config
     {
         try
         {
-            if (File.Exists(path))
+            if (!File.Exists(path)) return new Config();
+
+            var cfg = TryRead(path);
+            if (cfg is not null) return cfg;
+
+            // 主配置读不出来（写坏了 / 被别的程序改坏了）→ 试上一份备份。
+            // 配置里存着 API Key 和 GitHub PAT，静默退回默认值等于把用户的设置全弄丢。
+            var bak = path + ".bak";
+            var backup = TryRead(bak);
+            if (backup is not null)
             {
-                var json = File.ReadAllText(path);
-                var cfg = JsonSerializer.Deserialize<Config>(json, Options);
-                if (cfg is not null) return cfg;
+                Program.Trace($"config.json 解析失败，已从备份 {bak} 恢复");
+                RestoreFrom(path, bak);
+                return backup;
             }
+            Program.Trace("config.json 解析失败，改用默认配置启动（原文件保留，没有覆盖）");
         }
         catch { /* 配置坏了不该让程序起不来 */ }
         return new Config();
+    }
+
+    /// <summary>
+    /// 把备份内容原子写回主文件。
+    /// 备份本身要保住（不然下一次保存会拿坏文件把好备份覆盖掉），
+    /// 坏掉的主文件留成 .corrupt 备查。
+    /// </summary>
+    private static void RestoreFrom(string path, string bakPath)
+    {
+        try
+        {
+            var full = Path.GetFullPath(path);
+            var tmp = full + ".restore";
+            File.WriteAllText(tmp, File.ReadAllText(bakPath));
+            if (File.Exists(full)) File.Replace(tmp, full, full + ".corrupt");
+            else File.Move(tmp, full);
+        }
+        catch { /* 恢复不了就算了，至少数据还在 .bak 里 */ }
+    }
+
+    private static Config? TryRead(string path)
+    {
+        try
+        {
+            var json = File.ReadAllText(path);
+            return JsonSerializer.Deserialize<Config>(json, Options);
+        }
+        catch { return null; }
     }
 
     public void Save(string path)
     {
         try
         {
-            var dir = Path.GetDirectoryName(Path.GetFullPath(path));
+            var full = Path.GetFullPath(path);
+            var dir = Path.GetDirectoryName(full);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            File.WriteAllText(path, JsonSerializer.Serialize(this, Options));
+            var json = JsonSerializer.Serialize(this, Options);
+
+            // **原子写**：先写临时文件，再整体替换。
+            // 直接 File.WriteAllText 的话，写到一半崩了 / 断电就会留下半截 JSON，
+            // 下次启动配置读不出来 → API Key / PAT / 站点词表全丢，而且悄无声息。
+            // File.Replace 是原子的，顺带把上一版存成 .bak。
+            var tmp = full + ".tmp";
+            File.WriteAllText(tmp, json);
+            if (File.Exists(full))
+                File.Replace(tmp, full, full + ".bak");
+            else
+                File.Move(tmp, full);
         }
         catch { /* 存不了就算了 */ }
     }
