@@ -793,6 +793,20 @@ internal sealed class MainForm : Form
                       $"gridHeight = {Dpi.Px(18) + 7 * (_heatmap.CellSize + Dpi.Px(3))}");
         var rb = _header.ReportButton.PointToScreen(new Point(_header.ReportButton.Width / 2, _header.ReportButton.Height / 2));
         Program.Trace($"report button screen = {rb.X},{rb.Y} hwnd = {_header.ReportButton.Handle}");
+
+        // 热力图的时间范围 / 色阶按钮也是自绘的，UIA 找不到，只能记坐标
+        for (int i = 0; i < _rangeButtons.Length; i++)
+        {
+            if (_rangeButtons[i] is null) continue;
+            var p = _rangeButtons[i].PointToScreen(new Point(_rangeButtons[i].Width / 2, _rangeButtons[i].Height / 2));
+            Program.Trace($"range button[{i}] screen = {p.X},{p.Y}");
+        }
+        for (int i = 0; i < _paletteButtons.Length; i++)
+        {
+            if (_paletteButtons[i] is null) continue;
+            var p = _paletteButtons[i].PointToScreen(new Point(_paletteButtons[i].Width / 2, _paletteButtons[i].Height / 2));
+            Program.Trace($"palette button[{i}] screen = {p.X},{p.Y}");
+        }
     }
 
     protected override void SetVisibleCore(bool value)

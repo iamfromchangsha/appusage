@@ -152,14 +152,26 @@ internal sealed class HeatmapControl : Control
         using (var brush = new SolidBrush(Theme.Muted2))
         {
             int lastMonth = -1;
+            int lastYear = -1;
             for (int col = 0; col < _weeks; col++)
             {
                 int index = col * 7;
                 if (index >= _days.Count) break;
                 var date = _days[index].Date;
-                if (date.Day == 1 && date.Month != lastMonth)
+                // 原来要求「1 号正好落在这一列的第一天（也就是周日）」才画标签，
+                // 结果一年里只有两三个月碰巧对得上，月份轴几乎是空的。
+                // 改成：只要**跨到了新的一月**就在这一列标出来（和 GitHub 一样）。
+                if (lastMonth == -1)
                 {
                     lastMonth = date.Month;
+                    lastYear = date.Year;
+                    g.DrawString($"{date.Month}月", font, brush, x0 + col * (size + gap), Dpi.Px(this, 1));
+                    continue;
+                }
+                if (date.Month != lastMonth || date.Year != lastYear)
+                {
+                    lastMonth = date.Month;
+                    lastYear = date.Year;
                     g.DrawString($"{date.Month}月", font, brush, x0 + col * (size + gap), Dpi.Px(this, 1));
                 }
             }
