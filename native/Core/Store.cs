@@ -12,19 +12,21 @@ namespace AppUsage.Core;
 /// </summary>
 internal sealed class Store
 {
-    private readonly string _logPath;
+    private readonly string _logDir;
     private readonly Config _config;
     private readonly TopicParser _topics;
     private readonly object _sync = new();
-    private readonly List<byte> _pending = new();
-    private long _offset;
+    private readonly Dictionary<string, long> _fileOffsets = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>单次读取的最大字节数（超过则分多次读，避免一次分配过大）。</summary>
+    private const int MaxChunk = 4 * 1024 * 1024;
 
     public readonly SortedDictionary<DateTime, DayBucket> Days = new();
     public readonly Dictionary<string, AppAggregate> Apps = new();
 
-    public Store(string logPath, Config config)
+    public Store(string logDir, Config config)
     {
-        _logPath = logPath;
+        _logDir = logDir;
         _config = config;
         _topics = new TopicParser(config);
     }
@@ -35,45 +37,72 @@ internal sealed class Store
     /// <summary>数据版本号：有新数据进来才 +1，UI 据此决定要不要重建。</summary>
     public int Version { get; private set; }
 
-    /// <summary>读取日志里新增的行并更新聚合。</summary>
+    /// <summary>读取日志里新增的行并更新聚合（支持按天分片的多个文件）。</summary>
     public void Reload()
     {
         lock (_sync)
         {
+            var changed = false;
             try
             {
-                var info = new FileInfo(_logPath);
-                if (!info.Exists) return;
-                if (info.Length <= _offset) { RecomputeWindows(); return; }
-
-                using var fs = new FileStream(_logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                fs.Seek(_offset, SeekOrigin.Begin);
-                var buf = new byte[info.Length - _offset];
-                var read = fs.Read(buf, 0, buf.Length);
-                if (read > 0) _pending.AddRange(buf.AsSpan(0, read).ToArray());
-
-                // 只处理完整的行，残留的半行留到下次
-                int lastNl = -1;
-                for (int i = 0; i < _pending.Count; i++)
-                    if (_pending[i] == (byte)'\n') lastNl = i;
-                if (lastNl < 0) { RecomputeWindows(); return; }
-
-                var text = Encoding.UTF8.GetString(_pending.ToArray(), 0, lastNl + 1);
-                _pending.RemoveRange(0, lastNl + 1);
-                _offset += lastNl + 1;
-
-                foreach (var raw in text.Split('\n'))
+                foreach (var file in LogFiles())
                 {
-                    var line = raw.TrimEnd('\r');
-                    if (line.Length == 0) continue;
-                    Apply(line);
+                    var info = new FileInfo(file);
+                    if (!info.Exists) continue;
+                    var offset = _fileOffsets.GetValueOrDefault(file);
+                    if (info.Length <= offset) continue;
+
+                    // 每个文件独立处理：只吃「完整行」，文件末尾的半行留在原处等下次补齐。
+                    // 早期文件若因崩溃残留半行，绝不能和后面文件的内容粘成一行，
+                    // 所以这里不共用跨文件的缓冲区。
+                    var budget = (int)Math.Min(info.Length - offset, MaxChunk);
+                    var buf = new byte[budget];
+                    int read;
+                    using (var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    {
+                        fs.Seek(offset, SeekOrigin.Begin);
+                        read = fs.Read(buf, 0, budget);
+                    }
+                    if (read <= 0) continue;
+
+                    int lastNl = -1;
+                    for (int i = read - 1; i >= 0; i--)
+                    {
+                        if (buf[i] == (byte)'\n') { lastNl = i; break; }
+                    }
+                    if (lastNl < 0) continue;   // 全是半行，等下一次再读
+
+                    var text = Encoding.UTF8.GetString(buf, 0, lastNl + 1);
+                    _fileOffsets[file] = offset + lastNl + 1;
+                    if (text.Length > 0 && text[0] == '\uFEFF') text = text[1..];   // 去 BOM
+
+                    foreach (var raw in text.Split('\n'))
+                    {
+                        var line = raw.TrimEnd('\r');
+                        if (line.Length == 0) continue;
+                        Apply(line);
+                        changed = true;
+                    }
                 }
-                Version++;
             }
             catch { /* 日志正在被写，读失败就下一轮再读 */ }
 
+            if (changed) Version++;
             RecomputeWindows();
         }
+    }
+
+    /// <summary>日志文件列表（按天分片，文件名排序即时间顺序）。</summary>
+    private List<string> LogFiles()
+    {
+        try
+        {
+            if (!Directory.Exists(_logDir)) return new List<string>();
+            var files = new List<string>(Directory.GetFiles(_logDir, "*.log"));
+            files.Sort(StringComparer.OrdinalIgnoreCase);
+            return files;
+        }
+        catch { return new List<string>(); }
     }
 
     private void Apply(string line)

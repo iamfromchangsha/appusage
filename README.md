@@ -163,10 +163,10 @@
 
 ## 资源占用（2026-10-23 实测，本机 150% 缩放）
 
-| 场景 | 内存（私有） | CPU | 线程 |
+| 场景 | 内存（私有 / 工作集） | CPU | 线程 |
 |---|---|---|---|
-| 托盘常驻 | **57.4 MB** | **0.05 %** | 10 |
-| 主界面打开 | 约 86 MB | 约 0.2 % | 20 |
+| 托盘常驻 | **62 MB / 135 MB** | **≈ 0 %** | 10 |
+| 主界面打开 | 约 98 MB | 约 0.2 % | 20 |
 
 > Python 网页版虽然自身只要 10 MB，但**必须开浏览器**——一个 Edge / Chrome 窗口额外占
 > 100~300 MB。原生 EXE 没有任何浏览器进程，**总占用反而更低**。
@@ -186,14 +186,18 @@
    避免人走开后把时长算到某个程序头上
 3. 前台应用没变就继续计时；变了就把上一段追加写进日志。跨零点的片段**按自然日拆开**
 
-数据落在 `dist\data\usage.log`（纯文本 TSV，追加写）。仪表盘**只读新增行**，
-并压成两层聚合：
+数据落在 `dist\data\logs\YYYY-MM-DD.log`（纯文本 TSV，追加写，**一天一个文件**）。
+仪表盘**只读新增行**，并压成两层聚合：
 
 ```
 (天 → 总量 / 各应用 / 各小时 / 主题 / 站点 / 段序列)  +  (应用 → 累计)
 ```
 
 即使日志有几十万行，内存里也只有几万条聚合记录。
+
+> **为什么按天分文件**：单个 `usage.log` 无限增长，既不好备份也不方便按天清理，
+> 而且一年后单文件会大到每次启动都要扫一遍。现在每天一个文件，
+> 老版本遗留的 `usage.log` 会自动迁移成 `logs\0000-legacy.log`（历史不丢）。
 
 ### 应用归类
 
@@ -229,9 +233,36 @@
 AppUsage.exe              打开主界面
 AppUsage.exe --tray       只在托盘常驻（开机自启用这个）
 AppUsage.exe --data <目录>  指定数据目录
+AppUsage.exe --selftest   跑内置自测（67 个用例），结果同时写到 data\selftest.txt
 AppUsage.exe --dump <yyyy-MM-dd>  把某天的日报导出成 data\report-dump.txt（调试用）
 AppUsage.exe --test-shot  抓一张当前前台窗口的图（自测截图链路用）
 ```
+
+> 本程序是 `WinExe`（双击不出黑框），所以命令行用法启动时会把进程**挂到当前终端的控制台**上，
+> 输出直接看得见。`--selftest` / `--dump` / `--test-shot` 是**纯查询**，
+> **不会**启动后台追踪，也**不会**触发随机截图——一条调试命令不该顺手截了你的屏。
+
+---
+
+## 开发与自测
+
+```powershell
+# 跑内置自测（67 个用例：标题解析 / 站点识别 / 凭据清洗 / 段合并 / 跨零点 / 日志解析 / 配置往返）
+cd D:\minimax\coder\appusage\dist
+Start-Process -FilePath .\AppUsage.exe -ArgumentList '--selftest' -NoNewWindow -Wait -PassThru
+
+# 看运行状态与统计（今日 / 累计 / TOP5）
+powershell -File scripts\status.ps1
+
+# 导出某天的日报到文本
+.\AppUsage.exe --dump 2026-10-22
+```
+
+自测是**纯逻辑**的（不联网、不碰真实数据），所以随时可以跑。
+新增功能时顺手在 `native\Core\SelfTest.cs` 里加一条用例，比手动点界面可靠得多。
+
+> **发布顺序铁律**：先 `Stop-Process AppUsage` 再 `dotnet publish`。
+> exe 被占用时 publish 会**静默失败**，你只会看到「改好了但没生效」。
 
 ---
 
@@ -239,21 +270,24 @@ AppUsage.exe --test-shot  抓一张当前前台窗口的图（自测截图链路
 
 ```
 native/
-├─ Program.cs              入口（--tray / --data / --dump / --test-shot）
+├─ Program.cs              入口（--tray / --data / --selftest / --dump / --test-shot）
 ├─ Core/
 │  ├─ NativeMethods.cs      Win32 P/Invoke：前台窗口 / 进程路径 / 空闲 / 抓屏
-│  ├─ Tracker.cs            后台采集线程，追加写日志
-│  ├─ Store.cs              增量读取 + 聚合
+│  ├─ ConsoleHost.cs        让 WinExe 也能往控制台输出（命令行用法要用）
+│  ├─ Tracker.cs            后台采集线程，按天分片写日志，跨零点拆分
+│  ├─ Store.cs              增量读取多个日志文件 + 聚合
 │  ├─ TopicParser.cs        窗口标题清洗 / 剥后缀 / 认站点
 │  ├─ CategoryMap.cs        应用分类 + 站点关键词表
 │  ├─ ReportModel.cs        日报数据模型
 │  ├─ ReportBuilder.cs      从 Store 装配日报（纯函数、离线）
+│  ├─ SelfTest.cs           内置自测用例（--selftest）
+│  ├─ TokenUtil.cs          凭据提取（按固定长度截取，避免粘串）
 │  ├─ Screenshotter.cs      抓窗 + JPEG 编码（含黑图检测与降级）
 │  ├─ ShotService.cs        截图后台线程 + 限额 + outbox 重试
 │  ├─ ShotUploader.cs       GitHub Contents API 存档
 │  ├─ ShotIndex.cs          列出当天缩略图 + 算 GitHub 原图链接
 │  ├─ AiClient.cs           DeepSeek 调用
-│  ├─ Config.cs / AppPaths.cs / UiPrefs.cs / Models.cs
+│  └─ Config.cs / AppPaths.cs / UiPrefs.cs / Models.cs
 ├─ Ui/
 │  ├─ MainForm.cs           主界面
 │  ├─ ReportForm.cs         日报页
@@ -264,7 +298,10 @@ native/
 │  ├─ ShotGrid.cs           截图缩略图网格
 │  ├─ SmtControls.cs        斜切按钮 / 斜体文字
 │  ├─ Card.cs               卡片容器 / 顶栏
-│  └─ Theme.cs              配色 + 几何 + DPI 缩放
+│  ├─ Theme.cs              配色 + 几何 + DPI 缩放
+│  ├─ TrayHost.cs           托盘常驻宿主
+│  ├─ Autostart.cs          开机自启（快捷方式）
+│  └─ ReportDump.cs         --dump 的文本输出
 └─ tools/                   开发自检脚本（抓图 / 模拟点击 / 窗口枚举）
 ```
 
@@ -281,6 +318,21 @@ native/
 - 远程桌面 / 锁屏期间视同空闲，不会计时长。
 - 换了 exe 名就认成新应用，升级改名的软件历史会断档。
 - 纯前台轮询，秒级精度约 ±1 秒。
+
+---
+
+## 出问题先看这几个文件
+
+| 文件 | 里面是什么 |
+|---|---|
+| `dist\data\error.log` | **未捕获异常**（含完整堆栈）+ 启动失败原因 |
+| `dist\data\trace.log` | 调试流水：皮肤切换、截图尝试、布局参数 |
+| `dist\data\selftest.txt` | 最近一次 `--selftest` 的完整结果 |
+| `dist\data\logs\*.log` | 原始采集数据（TSV，一天一个文件） |
+| `dist\data\shots\outbox\` | 截图上传失败的排队队列（下次启动自动补传） |
+
+程序不会再弹那种丑陋的 .NET 未处理异常对话框——异常一律写进 `error.log`，
+主界面照常可用。
 
 ---
 

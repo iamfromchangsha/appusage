@@ -9,7 +9,7 @@ namespace AppUsage.Core;
 /// </summary>
 internal sealed class Tracker : IDisposable
 {
-    private readonly string _logPath;
+    private readonly string _logDir;
     private readonly Config _config;
     private readonly HashSet<string> _excluded;
     private readonly CancellationTokenSource _cts = new();
@@ -17,6 +17,7 @@ internal sealed class Tracker : IDisposable
 
     private Thread? _thread;
     private StreamWriter? _writer;
+    private string _writerDate = string.Empty;
 
     private string _currentKey = string.Empty;
     private string _currentExe = string.Empty;
@@ -26,21 +27,17 @@ internal sealed class Tracker : IDisposable
     public bool IsRunning => _thread is { IsAlive: true };
     public DateTime StartedAt { get; private set; }
 
-    public Tracker(string logPath, Config config)
+    public Tracker(string logDir, Config config)
     {
-        _logPath = logPath;
+        _logDir = logDir;
         _config = config;
         _excluded = new HashSet<string>(config.ExcludedExes, StringComparer.OrdinalIgnoreCase);
     }
 
     public void Start()
     {
-        var dir = Path.GetDirectoryName(_logPath);
-        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-
-        _writer = new StreamWriter(
-            new FileStream(_logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite, 4096, FileOptions.WriteThrough),
-            new UTF8Encoding(false)) { AutoFlush = true, NewLine = "\n" };
+        Directory.CreateDirectory(_logDir);
+        EnsureWriter(DateTime.Today);
 
         StartedAt = DateTime.Now;
         _thread = new Thread(Loop) { IsBackground = true, Name = "AppUsage.Tracker", Priority = ThreadPriority.BelowNormal };
@@ -117,7 +114,57 @@ internal sealed class Tracker : IDisposable
         _currentKey = string.Empty;
     }
 
+    /// <summary>按天分文件写日志（data\logs\YYYY-MM-DD.log），跨零点自动切文件。</summary>
+    private void EnsureWriter(DateTime day)
+    {
+        var date = day.ToString("yyyy-MM-dd");
+        lock (_writeLock)
+        {
+            if (_writerDate == date && _writer is not null) return;
+            try { _writer?.Flush(); _writer?.Dispose(); } catch { }
+            _writer = null;
+
+            Directory.CreateDirectory(_logDir);
+            var path = Path.Combine(_logDir, date + ".log");
+            _writer = new StreamWriter(
+                new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite, 4096, FileOptions.WriteThrough),
+                new UTF8Encoding(false)) { AutoFlush = true, NewLine = "\n" };
+            _writerDate = date;
+        }
+    }
+
+    /// <summary>
+    /// 把一段使用时间按「自然日」边界拆开。
+    /// 跨零点的使用（比如 23:59:40 → 00:00:20）必须拆成两天，
+    /// 否则 20 秒会整段落进前一天，当天的时间对不上。
+    /// </summary>
+    internal static List<(double Start, double End)> SplitByDay(double start, double end)
+    {
+        var pieces = new List<(double, double)>();
+        if (end <= start) return pieces;
+
+        var cursor = start;
+        // 最多切 4 段（防呆：万一时钟被往回拨过）
+        for (int guard = 0; guard < 4 && cursor < end; guard++)
+        {
+            var local = DateTimeOffset.FromUnixTimeMilliseconds((long)(cursor * 1000)).LocalDateTime;
+            var midnight = new DateTimeOffset(local.Date.AddDays(1)).ToUnixTimeMilliseconds() / 1000.0;
+            var pieceEnd = Math.Min(end, midnight);
+            if (pieceEnd <= cursor) break;
+            pieces.Add((cursor, pieceEnd));
+            cursor = pieceEnd;
+        }
+        if (cursor < end) pieces.Add((cursor, end));
+        return pieces;
+    }
+
     private void WriteSegment(string key, string exe, string title, double start, double end)
+    {
+        foreach (var (s, e) in SplitByDay(start, end))
+            WriteLine(key, exe, title, s, e);
+    }
+
+    private void WriteLine(string key, string exe, string title, double start, double end)
     {
         var duration = end - start;
         if (duration <= 0) return;
@@ -129,9 +176,17 @@ internal sealed class Tracker : IDisposable
             end.ToString("F3", CultureInfo.InvariantCulture),
             duration.ToString("F3", CultureInfo.InvariantCulture));
 
+        // 文件按「这一段真正发生的那天」来分，而不是写入时的当前时刻
+        var day = DateTimeOffset.FromUnixTimeMilliseconds((long)(start * 1000)).LocalDateTime;
+
         lock (_writeLock)
         {
-            try { _writer?.WriteLine(line); } catch { /* ignore */ }
+            try
+            {
+                EnsureWriter(day);
+                _writer?.WriteLine(line);
+            }
+            catch { /* ignore */ }
         }
     }
 

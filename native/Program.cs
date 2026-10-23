@@ -5,9 +5,20 @@ namespace AppUsage;
 
 internal static class Program
 {
+    /// <summary>实际使用的数据目录（崩溃日志写到这儿，便于事后找）。</summary>
+    private static string _dataDir = Path.Combine(AppContext.BaseDirectory, "data");
+
     [STAThread]
     private static int Main(string[] args)
     {
+        // 命令行用法（自测 / 导出 / 抓图）需要看得见输出：
+        // 本程序是 WinExe，默认没有控制台，先挂到父进程的控制台上。
+        bool cliMode = args.Any(a =>
+            a.Equals("--selftest", StringComparison.OrdinalIgnoreCase) ||
+            a.Equals("--dump", StringComparison.OrdinalIgnoreCase) ||
+            a.Equals("--test-shot", StringComparison.OrdinalIgnoreCase));
+        if (cliMode) ConsoleHost.Attach();
+
         bool trayMode = args.Any(a =>
             a.Equals("--tray", StringComparison.OrdinalIgnoreCase) ||
             a.Equals("/tray", StringComparison.OrdinalIgnoreCase));
@@ -26,20 +37,29 @@ internal static class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 
+        // 未捕获异常：写进 error.log，别弹系统那个丑对话框
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += (_, e) => LogCrash(e.Exception);
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => LogCrash(e.ExceptionObject as Exception);
+
         Tracker? tracker = null;
-        ShotUploader? uploader = null;
         ShotService? shots = null;
         try
         {
             var paths = AppPaths.Resolve(dataDir);
             var config = Config.Load(paths.ConfigPath);
-            var store = new Store(paths.LogPath, config);
+            _dataDir = paths.DataDir;
+            paths.MigrateLegacyLog();
+            var store = new Store(paths.LogDir, config);
             store.Reload();
 
-            tracker = new Tracker(paths.LogPath, config);
-            tracker.Start();
+            // 自测：--selftest 跑一组纯逻辑回归测试后退出
+            if (args.Any(a => a.Equals("--selftest", StringComparison.OrdinalIgnoreCase)))
+            {
+                return SelfTest.Run(Path.Combine(paths.DataDir, "selftest.txt"));
+            }
 
-            // 自测：--test-shot 抓一张当前前台窗口的图，验证截图链路
+            // 调试用：--test-shot 抓一张当前前台窗口的图，验证截图链路
             if (args.Any(a => a.Equals("--test-shot", StringComparison.OrdinalIgnoreCase)))
             {
                 var hwnd = NativeMethods.GetForegroundWindow();
@@ -52,16 +72,12 @@ internal static class Program
                 {
                     Console.WriteLine("capture failed (可能是黑图或窗口不可抓)");
                 }
-                tracker.Stop();
                 return 0;
             }
 
-            // 随机截图服务（独立线程，不阻塞追踪）
-            shots = new ShotService(config, paths.DataDir);
-            shots.Start();
-
             // 调试用：--dump <yyyy-MM-dd> 把某天的日报数据导出成文本后退出
-            int dumpIdx = Array.FindIndex(args, a => a.Equals("--dump", StringComparison.OrdinalIgnoreCase));            if (dumpIdx >= 0 && dumpIdx + 1 < args.Length)
+            int dumpIdx = Array.FindIndex(args, a => a.Equals("--dump", StringComparison.OrdinalIgnoreCase));
+            if (dumpIdx >= 0 && dumpIdx + 1 < args.Length)
             {
                 if (!DateTime.TryParse(args[dumpIdx + 1], out var dumpDay))
                     dumpDay = DateTime.Today;
@@ -72,9 +88,17 @@ internal static class Program
                 var path = Path.Combine(paths.DataDir, "report-dump.txt");
                 File.WriteAllText(path, ReportDump.Format(report, store, config), new System.Text.UTF8Encoding(false));
                 Console.WriteLine(path);
-                tracker.Stop();
                 return 0;
             }
+
+            // 到这里才是真正的常驻运行：才允许开追踪和随机截图
+            // （上面的命令行用法刻意不启动它们，免得一条调试命令就顺手截了屏）
+            tracker = new Tracker(paths.LogDir, config);
+            tracker.Start();
+
+            // 随机截图服务（独立线程，不阻塞追踪）
+            shots = new ShotService(config, paths.DataDir);
+            shots.Start();
 
             if (trayMode)
             {
@@ -92,7 +116,7 @@ internal static class Program
         {
             try
             {
-                var dir = dataDir ?? Path.Combine(AppContext.BaseDirectory, "data");
+                var dir = _dataDir;
                 Directory.CreateDirectory(dir);
                 File.AppendAllText(Path.Combine(dir, "error.log"),
                     $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} 启动失败\r\n{ex}\r\n\r\n");
@@ -113,12 +137,25 @@ internal static class Program
     {
         try
         {
-            var dir = Path.Combine(AppContext.BaseDirectory, "data");
-            Directory.CreateDirectory(dir);
-            File.AppendAllText(Path.Combine(dir, "trace.log"),
+            Directory.CreateDirectory(_dataDir);
+            File.AppendAllText(Path.Combine(_dataDir, "trace.log"),
                 $"{DateTime.Now:HH:mm:ss.fff}  {message}{Environment.NewLine}");
         }
         catch { /* ignore */ }
+    }
+
+    /// <summary>把未捕获异常写进 error.log（含堆栈），便于事后排查。</summary>
+    internal static void LogCrash(Exception? ex)
+    {
+        if (ex is null) return;
+        try
+        {
+            Directory.CreateDirectory(_dataDir);
+            File.AppendAllText(Path.Combine(_dataDir, "error.log"),
+                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} 未捕获异常{Environment.NewLine}{ex}{Environment.NewLine}{new string('-', 60)}{Environment.NewLine}");
+        }
+        catch { /* ignore */ }
+        Trace("CRASH: " + ex.Message);
     }
 }
 

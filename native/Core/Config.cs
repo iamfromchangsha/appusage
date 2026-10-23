@@ -27,7 +27,6 @@ internal sealed class ShotsConfig
     [JsonPropertyName("github_owner")] public string GithubOwner { get; set; } = string.Empty;
     [JsonPropertyName("github_repo")] public string GithubRepo { get; set; } = "appusage-shots";
     [JsonPropertyName("auto_create_repo")] public bool AutoCreateRepo { get; set; } = true;
-
     /// <summary>不截图的应用（隐私）。</summary>
     [JsonPropertyName("excluded")] public List<string> Excluded { get; set; } = new();
 
@@ -35,6 +34,8 @@ internal sealed class ShotsConfig
     [JsonPropertyName("thumb_width")] public int ThumbWidth { get; set; } = 320;
     [JsonPropertyName("jpeg_quality")] public int JpegQuality { get; set; } = 60;
 
+    /// <summary>GitHub 凭据是否配齐了（计算属性，不写进配置文件）。</summary>
+    [JsonIgnore]
     public bool HasGithub =>
         GithubToken.Length > 0 && GithubOwner.Length > 0 && GithubRepo.Length > 0;
 }

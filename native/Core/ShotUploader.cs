@@ -34,48 +34,68 @@ internal sealed class ShotUploader : IDisposable
 
     private async Task<string?> SendAsync(HttpRequestMessage req, CancellationToken ct)
     {
+        var (status, body) = await SendRawAsync(req, ct).ConfigureAwait(false);
+        if (status >= 200 && status < 300) return null;
+        if (status == 0) return body.Length > 0 ? body : "网络错误";
+        var detail = Describe(body);
+        return detail.Length > 0 ? $"HTTP {status} · {detail}" : $"HTTP {status}";
+    }
+
+    /// <summary>发一个请求，拿回状态码和正文。状态码 0 = 网络层面的错误（超时等）。</summary>
+    private async Task<(int Status, string Body)> SendRawAsync(HttpRequestMessage req, CancellationToken ct)
+    {
         try
         {
             using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
             var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            if (resp.IsSuccessStatusCode) return null;
-
-            string detail = $"HTTP {(int)resp.StatusCode}";
-            try
-            {
-                using var doc = JsonDocument.Parse(body);
-                if (doc.RootElement.TryGetProperty("message", out var m))
-                    detail += " · " + m.GetString();
-            }
-            catch { }
-            return detail;
+            return ((int)resp.StatusCode, body);
         }
-        catch (TaskCanceledException) { return "请求超时"; }
-        catch (Exception ex) { return ex.Message; }
+        catch (TaskCanceledException) { return (0, "请求超时"); }
+        catch (Exception ex) { return (0, ex.Message); }
     }
+
+    /// <summary>从 GitHub 的 JSON 里取出 message 字段。</summary>
+    private static string Describe(string body)
+    {
+        if (body.Length == 0) return string.Empty;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("message", out var m))
+                return m.GetString() ?? string.Empty;
+        }
+        catch { }
+        return string.Empty;
+    }
+
+    /// <summary>仓库不存在 / token 无权限 —— 这两种情况 GitHub 都返回 404，只能合并提示。</summary>
+    private string NotFoundMessage() =>
+        $"仓库 {Owner}/{Repo} 不存在，或这个 PAT 没有它的访问权限" +
+        $"（私有仓库对未授权的 token 会返回 404，不是 403）";
 
     /// <summary>确保私有仓库存在；返回 null 表示成功。</summary>
     public async Task<string?> EnsureRepoAsync(CancellationToken ct)
     {
         if (!Configured) return "未配置 GitHub token / owner / repo";
 
-        // 先看仓库在不在
-        var check = new HttpRequestMessage(HttpMethod.Get, $"https://api.github.com/repos/{Owner}/{Repo}");
-        Prepare(check);
-        using (check)
+        // 先看仓库在不在（顺带验证 token 有没有这个仓库的权限）
+        int status;
+        string body;
+        var probe = new HttpRequestMessage(HttpMethod.Get, $"https://api.github.com/repos/{Owner}/{Repo}");
+        Prepare(probe);
+        using (probe)
         {
-            using var resp = await _http.SendAsync(check, ct).ConfigureAwait(false);
-            if (resp.IsSuccessStatusCode) return null;
-            if ((int)resp.StatusCode != 404)
-                return $"仓库检查失败：HTTP {(int)resp.StatusCode}";
-            // 404 有两种可能：仓库真不存在，或者这个 PAT 没被授权访问它
-            // （GitHub 对没权限的私有仓库返回 404 而不是 403）
-            return $"仓库 {Owner}/{Repo} 不存在，或这个 PAT 没有它的访问权限" +
-                   $"（私有仓库对未授权的 token 会返回 404，不是 403）";
+            (status, body) = await SendRawAsync(probe, ct).ConfigureAwait(false);
         }
+        if (status == 200) return null;
+        if (status == 0) return $"仓库检查失败：{body}";
+        if (status != 404) return $"仓库检查失败：HTTP {status}";
 
-        if (!_config.Shots.AutoCreateRepo) return $"仓库 {Owner}/{Repo} 不存在，且未开启自动创建";
+        // 404 有两种可能：仓库真不存在，或者这个 PAT 没被授权访问它
+        // （GitHub 对没权限的私有仓库返回 404 而不是 403）
+        if (!_config.Shots.AutoCreateRepo) return NotFoundMessage();
 
+        // 自动建仓（私有）
         var createBody = new Dictionary<string, object>
         {
             ["name"] = Repo,
@@ -89,7 +109,15 @@ internal sealed class ShotUploader : IDisposable
         };
         Prepare(create);
         using (create)
-            return await SendAsync(create, ct).ConfigureAwait(false);
+        {
+            var (cs, cbody) = await SendRawAsync(create, ct).ConfigureAwait(false);
+            if (cs == 200 || cs == 201) return null;
+            if (cs == 0) return $"创建仓库失败：{cbody}";
+            // 422 = 名字已被占用 → 仓库其实存在，只是这个 token 看不见它
+            if (cs == 422) return NotFoundMessage();
+            var detail = Describe(cbody);
+            return $"创建仓库失败：HTTP {cs}" + (detail.Length > 0 ? " · " + detail : "");
+        }
     }
 
     /// <summary>列出这个 token 实际能访问的仓库（fine-grained PAT 只能看到被授权的）。</summary>

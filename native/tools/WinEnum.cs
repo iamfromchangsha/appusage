@@ -40,7 +40,7 @@ public class WinEnum
     }
 
     private static IntPtr _childRoot;
-    private static string _childNeedle;
+    private static string _childNeedle = string.Empty;
     private static List<string> _childFound = new List<string>();
 
     private static bool ChildCallback(IntPtr h, IntPtr l)

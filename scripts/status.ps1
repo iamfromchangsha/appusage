@@ -5,8 +5,7 @@ $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
 $exe = Join-Path $root 'dist\AppUsage.exe'
-$dataDir = Join-Path $root 'dist\data'
-$log = Join-Path $dataDir 'usage.log'
+$logDir = Join-Path $root 'dist\data\logs'
 
 Write-Host '========== 应用使用时长 · 状态 ==========' -ForegroundColor Cyan
 
@@ -23,41 +22,43 @@ $startup = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup
 if (Test-Path (Join-Path $startup '应用使用时长.lnk')) {
     Write-Host '[+] 开机自启：已开启' -ForegroundColor Green
 } else {
-    Write-Host '[-] 开机自启：未开启' -ForegroundColor Yellow
+    Write-Host '[-] 开机自启：未开启  (运行 scripts\toggle-autostart.ps1 可切换)' -ForegroundColor Yellow
 }
 
-if (-not (Test-Path $log)) {
-    Write-Host "[-] 还没有数据文件：$log" -ForegroundColor Yellow
+if (-not (Test-Path $logDir)) {
+    Write-Host "[-] 还没有数据目录：$logDir" -ForegroundColor Yellow
     exit 0
 }
 
-$sizeKb = [math]::Round((Get-Item $log).Length / 1KB, 1)
-Write-Host "[i] 数据文件：$log ($sizeKb KB)"
+$logFiles = Get-ChildItem $logDir -Filter *.log -ErrorAction SilentlyContinue
+$sizeKb = [math]::Round((($logFiles | Measure-Object -Property Length -Sum).Sum) / 1KB, 1)
+Write-Host "[i] 数据目录：$logDir（$($logFiles.Count) 个日志文件，共 $sizeKb KB）"
 
-# 用 Python 读一遍并输出纯 ASCII JSON，中文交给 PowerShell 格式化
+# 用 Python 读一遍并输出纯 ASCII JSON，中文标签交给 PowerShell 格式化
 $py = Join-Path $env:LOCALAPPDATA 'Programs\Python\Python313\python.exe'
 if (-not (Test-Path $py)) { $py = 'python' }
 
 $code = @'
-import json, sys, datetime
-path = sys.argv[1]
+import sys, os, glob, json, datetime
+log_dir = sys.argv[1]
 today = datetime.date.today().isoformat()
 daily = {}
 apps = {}
 total = 0.0
-with open(path, "r", encoding="utf-8") as fh:
-    for line in fh:
-        p = line.rstrip("\n").split("\t")
-        if len(p) < 6:
-            continue
-        try:
-            start = float(p[3]); dur = float(p[5])
-        except ValueError:
-            continue
-        d = datetime.datetime.fromtimestamp(start).strftime("%Y-%m-%d")
-        daily[d] = daily.get(d, 0.0) + dur
-        apps[p[0]] = apps.get(p[0], 0.0) + dur
-        total += dur
+for fp in sorted(glob.glob(os.path.join(log_dir, "*.log"))):
+    with open(fp, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            p = line.rstrip("\n").split("\t")
+            if len(p) < 6:
+                continue
+            try:
+                start = float(p[3]); dur = float(p[5])
+            except ValueError:
+                continue
+            d = datetime.datetime.fromtimestamp(start).strftime("%Y-%m-%d")
+            daily[d] = daily.get(d, 0.0) + dur
+            apps[p[0]] = apps.get(p[0], 0.0) + dur
+            total += dur
 out = {
     "total": total,
     "today": daily.get(today, 0.0),
@@ -71,7 +72,7 @@ print(json.dumps(out, ensure_ascii=True))
 $tmp = Join-Path $env:TEMP ("appusage_status_" + [guid]::NewGuid().ToString('N') + ".py")
 Set-Content -Path $tmp -Value $code -Encoding UTF8
 try {
-    $raw = & $py $tmp $log 2>$null | Select-Object -First 1
+    $raw = & $py $tmp $logDir 2>$null | Select-Object -First 1
 } finally {
     if (Test-Path $tmp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
 }

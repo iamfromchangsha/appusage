@@ -6,7 +6,26 @@ internal sealed class AppPaths
     public string BaseDir = string.Empty;
     public string DataDir = string.Empty;
     public string ConfigPath = string.Empty;
-    public string LogPath = string.Empty;
+
+    /// <summary>按天分片的日志目录（data\logs\YYYY-MM-DD.log）。</summary>
+    public string LogDir => Path.Combine(DataDir, "logs");
+
+    /// <summary>早期版本的单文件日志（仅用于迁移）。</summary>
+    public string LogPath => Path.Combine(DataDir, "usage.log");
+
+    /// <summary>把旧的单文件日志挪进 logs 目录，避免丢历史。</summary>
+    public void MigrateLegacyLog()
+    {
+        try
+        {
+            if (!File.Exists(LogPath)) return;
+            Directory.CreateDirectory(LogDir);
+            var target = Path.Combine(LogDir, "0000-legacy.log");
+            if (!File.Exists(target)) File.Move(LogPath, target);
+            else File.Delete(LogPath);
+        }
+        catch { /* ignore */ }
+    }
 
     public static AppPaths Resolve(string? dataDirOverride)
     {
@@ -38,7 +57,6 @@ internal sealed class AppPaths
             BaseDir = baseDir,
             DataDir = dataDir,
             ConfigPath = configPath,
-            LogPath = Path.Combine(dataDir, "usage.log"),
         };
     }
 }

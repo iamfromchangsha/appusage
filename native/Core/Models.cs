@@ -6,7 +6,7 @@ namespace AppUsage.Core;
 internal sealed class DayBucket
 {
     public double Total;
-    public int AppCount;
+    public int AppCount => Apps.Count;
     public readonly Dictionary<string, double> Apps = new();
     public readonly Dictionary<int, double> Hours = new();
 
