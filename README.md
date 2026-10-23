@@ -96,6 +96,15 @@
 - key 存本地 `config.json`，**不写进任何日志**
 - 失败（401 / 429 / 超时）会显示明确原因 + 重试按钮，**不影响报告的其它部分**
 
+> **两个踩过的坑（已修）**
+>
+> 1. **思考模式下推理 token 也算进 `max_tokens`**。原来固定 900，结果推理就把预算吃光，
+>    模型来不及输出正文——实测 `finish_reason=length`、正文长度 **0**，
+>    **AI 总结一个字都出不来**，界面只显示「返回内容为空」。
+>    现在开思考模式给 8000（关掉给 1200），而且被截断时**自动加倍重试一次**。
+> 2. DeepSeek 回的 `Content-Type` 只有 `application/json`、**不带 charset**。
+>    现在响应正文自己按 **UTF-8 显式解码**，不赌运行时的默认值（不然中文总结会变乱码）。
+
 ---
 
 ## 随机使用截图 + 私有 GitHub 存档（可选，默认关闭）
@@ -269,8 +278,10 @@
 AppUsage.exe              打开主界面
 AppUsage.exe --tray       只在托盘常驻（开机自启用这个）
 AppUsage.exe --data <目录>  指定数据目录
-AppUsage.exe --selftest   跑内置自测（85 个用例），结果同时写到 data\selftest.txt
+AppUsage.exe --selftest   跑内置自测（97 个用例），结果同时写到 data\selftest.txt
 AppUsage.exe --memcheck [天数]  造合成日志量内存占用（默认 30 天，可传 365 看一年）
+AppUsage.exe --test-ai    测 DeepSeek 连接（模型回复会打印出来，用来验证中文没乱码）
+AppUsage.exe --ai-summary [yyyy-MM-dd]  生成某天的 AI 总结并打印（默认今天）
 AppUsage.exe --dump <yyyy-MM-dd>  把某天的日报导出成 data\report-dump.txt（调试用）
 AppUsage.exe --test-shot  抓一张当前前台窗口的图（自测截图链路用）
 ```
@@ -284,12 +295,15 @@ AppUsage.exe --test-shot  抓一张当前前台窗口的图（自测截图链路
 ## 开发与自测
 
 ```powershell
-# 跑内置自测（85 个用例：标题解析 / 站点识别 / 凭据清洗 / 段合并 / 跨零点 / 日志解析 / 截图命名 / 配置往返）
+# 跑内置自测（97 个用例：标题解析 / 站点识别 / 凭据清洗 / 段合并 / 跨零点 / 日志解析 / 截图命名 / AI 响应解析 / 配置往返）
 cd D:\minimax\coder\appusage\dist
 Start-Process -FilePath .\AppUsage.exe -ArgumentList '--selftest' -NoNewWindow -Wait -PassThru
 
 # 内存体检：造 365 天的合成日志，看启动要多久、吃多少内存
 Start-Process -FilePath .\AppUsage.exe -ArgumentList '--memcheck','365' -NoNewWindow -Wait -PassThru
+
+# 测 DeepSeek：能顺便确认中文没乱码
+Start-Process -FilePath .\AppUsage.exe -ArgumentList '--test-ai' -NoNewWindow -Wait -PassThru
 
 # 看运行状态与统计（今日 / 累计 / TOP5）
 powershell -File scripts\status.ps1

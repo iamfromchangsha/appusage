@@ -63,6 +63,43 @@ internal sealed class ReportForm : Form
 
         BuildUi();
         RefreshReport();
+        FitAiText();
+    }
+
+    /// <summary>
+    /// 把关键控件的屏幕坐标写进 trace.log。
+    /// 自绘按钮（MiniButton）没有原生窗口句柄，UIA / EnumChildWindows 都找不到，
+    /// 自动化验证只能靠这里的坐标。
+    /// </summary>
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        try
+        {
+            var ab = _aiBtn.PointToScreen(new Point(_aiBtn.Width / 2, _aiBtn.Height / 2));
+            var sb = _aiSettings.PointToScreen(new Point(_aiSettings.Width / 2, _aiSettings.Height / 2));
+            Program.Trace($"report shown ai button screen = {ab.X},{ab.Y} " +
+                          $"settings screen = {sb.X},{sb.Y} hwnd = {Handle}");
+        }
+        catch { /* ignore */ }
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        FitAiText();
+    }
+
+    /// <summary>AI 正文要按卡片实际宽度折行，窗口变宽变窄都要跟上。</summary>
+    private void FitAiText()
+    {
+        try
+        {
+            var content = _aiCard.Content;
+            int w = content.ClientSize.Width - content.Padding.Horizontal;
+            if (w > P(120)) _aiText.MaximumSize = new Size(w, 0);
+        }
+        catch { /* ignore */ }
     }
 
     // ---------------------------------------------------------------- UI
@@ -80,7 +117,7 @@ internal sealed class ReportForm : Form
         };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(46)));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(92)));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(104)));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(122)));   // AI 总结：3~5 句要放得下
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(98)));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(150)));
@@ -173,11 +210,16 @@ internal sealed class ReportForm : Form
         _aiCard.Dock = DockStyle.Fill;
         _aiCard.Margin = new Padding(P(18), 0, P(18), P(6));
 
-        _aiText.Dock = DockStyle.Fill;
+        _aiText.Dock = DockStyle.Top;
+        _aiText.AutoSize = true;      // 高度随文字长
+        // Label 的 AutoSize=true 默认**不换行**（会变成一条长横线），
+        // 必须用 MaximumSize 把宽度钉住，它才会按宽度折行
+        _aiText.MaximumSize = new Size(P(900), 0);
         _aiText.ForeColor = Theme.TextDim;
         _aiText.Font = new Font("Segoe UI", 9f);
         _aiText.BackColor = Color.Transparent;
         _aiText.TextAlign = ContentAlignment.TopLeft;
+        _aiCard.Content.AutoScroll = true;
 
         _aiBtn.Text = "生成总结";
         _aiBtn.Size = new Size(P(84), P(26));
@@ -391,6 +433,8 @@ internal sealed class ReportForm : Form
         try
         {
             var (text, error) = await ai.SummarizeAsync(_report, CancellationToken.None).ConfigureAwait(true);
+            Program.Trace($"[ai] {_report.Date:yyyy-MM-dd} 返回：error={error ?? "(无)"} 长度={text?.Length ?? 0} " +
+                          $"预览={(text is null ? "" : text.Replace("\r", " ").Replace("\n", " "))}");
             if (error is null && !string.IsNullOrWhiteSpace(text))
             {
                 _aiText.Text = text;

@@ -20,9 +20,26 @@ internal sealed class AiClient : IDisposable
                               && TokenUtil.Extract(_config.Ai.ApiKey, TokenUtil.AiPattern).Length > 0
                               && _config.Ai.BaseUrl.Length > 0;
 
+    /// <summary>
+    /// 接口地址。用户很可能只填 "api.deepseek.com" 而忘了写协议，
+    /// 那样拼出来的 URL 不是绝对地址，会直接抛异常。缺协议就补 https。
+    /// </summary>
+    private string Endpoint
+    {
+        get
+        {
+            var b = _config.Ai.BaseUrl.Trim().TrimEnd('/');
+            if (b.Length == 0) return b;
+            if (!b.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+                !b.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                b = "https://" + b;
+            return b;
+        }
+    }
+
     private HttpRequestMessage BuildRequest(object body)
     {
-        var req = new HttpRequestMessage(HttpMethod.Post, $"{_config.Ai.BaseUrl.TrimEnd('/')}/chat/completions")
+        var req = new HttpRequestMessage(HttpMethod.Post, $"{Endpoint}/chat/completions")
         {
             Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"),
         };
@@ -32,7 +49,7 @@ internal sealed class AiClient : IDisposable
         return req;
     }
 
-    private object BuildBody(string system, string user)
+    private object BuildBody(string system, string user, int maxTokens)
     {
         var messages = new List<object>
         {
@@ -45,7 +62,7 @@ internal sealed class AiClient : IDisposable
             ["model"] = _config.Ai.Model,
             ["messages"] = messages,
             ["stream"] = false,
-            ["max_tokens"] = 900,
+            ["max_tokens"] = maxTokens,
         };
         if (_config.Ai.Thinking)
         {
@@ -55,20 +72,45 @@ internal sealed class AiClient : IDisposable
         return body;
     }
 
+    /// <summary>
+    /// 每次请求的 token 预算。
+    /// <para>
+    /// ⚠️ **开思考模式时推理 token 也算进 max_tokens**。原来固定 900，
+    /// 结果推理就把预算吃光，模型来不及输出正文——
+    /// 实测 <c>finish_reason=length</c>、正文长度 0，AI 总结**一个字都出不来**。
+    /// </para>
+    /// </summary>
+    private static int MaxTokensFor(bool thinking) => thinking ? 8000 : 1200;
+
     /// <summary>生成当天总结。Error 为 null 表示成功，Text 是总结正文。</summary>
     public async Task<(string? Text, string? Error)> SummarizeAsync(ReportData report, CancellationToken ct)
     {
         if (!Configured) return (null, "未配置 DeepSeek（需要在设置里填 API Key）");
-        var (text, error) = await SendAsync(BuildBody(SystemPrompt, BuildUserContent(report)), ct).ConfigureAwait(false);
+
+        var system = SystemPrompt;
+        var user = BuildUserContent(report);
+        var budget = MaxTokensFor(_config.Ai.Thinking);
+
+        var (text, error) = await SendAsync(BuildBody(system, user, budget), ct).ConfigureAwait(false);
+        if (error is not null && error.Contains("截断"))
+        {
+            // 预算还是不够，自动加倍再试一次
+            var (t2, e2) = await SendAsync(BuildBody(system, user, budget * 2), ct).ConfigureAwait(false);
+            if (e2 is null) return (t2, null);
+        }
         return (text, error);
     }
 
-    /// <summary>测试 key 与模型名是否可用。</summary>
-    public async Task<string?> TestAsync(CancellationToken ct)
+    /// <summary>测试 key 与模型名是否可用。返回 (模型的回复, 错误)，错误为 null 表示成功。</summary>
+    public async Task<(string? Text, string? Error)> TestAsync(CancellationToken ct)
     {
-        if (_config.Ai.ApiKey.Length == 0) return "还没填 API Key";
-        var (_, error) = await SendAsync(BuildBody("只回复两个字：可用", "测试"), ct).ConfigureAwait(false);
-        return error;
+        if (TokenUtil.Extract(_config.Ai.ApiKey, TokenUtil.AiPattern).Length == 0)
+            return (null, "还没填 API Key");
+        if (_config.Ai.BaseUrl.Trim().Length == 0)
+            return (null, "还没填接口地址");
+        // 注意：这里不查 Ai.Enabled —— 用户可能想先测通了再打开开关
+        return await SendAsync(BuildBody("只回复两个字：可用", "测试", MaxTokensFor(_config.Ai.Thinking)), ct)
+            .ConfigureAwait(false);
     }
 
     private async Task<(string? Text, string? Error)> SendAsync(object body, CancellationToken ct)
@@ -77,49 +119,107 @@ internal sealed class AiClient : IDisposable
         try
         {
             using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
-            var text = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            var text = await ReadBodyAsync(resp, ct).ConfigureAwait(false);
 
             if (!resp.IsSuccessStatusCode)
             {
-                string detail = $"HTTP {(int)resp.StatusCode}";
+                var status = (int)resp.StatusCode;
+                string serverMsg = string.Empty;
                 try
                 {
                     using var doc = JsonDocument.Parse(text);
                     if (doc.RootElement.TryGetProperty("error", out var err) &&
                         err.TryGetProperty("message", out var em))
-                        detail = em.GetString() ?? detail;
+                        serverMsg = em.GetString() ?? string.Empty;
                     else if (doc.RootElement.TryGetProperty("message", out var m))
-                        detail = m.GetString() ?? detail;
+                        serverMsg = m.GetString() ?? string.Empty;
                 }
                 catch { }
-                var friendly = detail switch
+
+                // 友好提示必须按 **状态码** 判断。
+                // 之前这里把状态码覆盖成了服务端正文，那套中文提示几乎永远匹配不上，
+                // 用户只会看到一串英文原始报错。
+                var friendly = status switch
                 {
-                    var d when d.Contains("401") => "API Key 无效或已过期",
-                    var d when d.Contains("402") || d.Contains("403") => "余额不足或没有权限",
-                    var d when d.Contains("429") => "请求太频繁，稍后重试",
-                    var d when d.Contains("model") => $"模型名不被支持（当前：{_config.Ai.Model}）",
-                    _ => detail,
+                    401 => "API Key 无效或已过期",
+                    402 or 403 => "余额不足或没有权限",
+                    429 => "请求太频繁，稍后重试",
+                    400 when serverMsg.Contains("model", StringComparison.OrdinalIgnoreCase)
+                        => $"模型名不被支持（当前：{_config.Ai.Model}）",
+                    _ => serverMsg.Length > 0 ? $"HTTP {status} · {serverMsg}" : $"HTTP {status}",
                 };
                 return (null, friendly);
             }
 
             try
             {
-                using var doc = JsonDocument.Parse(text);
-                if (!doc.RootElement.TryGetProperty("choices", out var choices) || choices.GetArrayLength() == 0)
-                    return (null, "返回内容为空");
-                var msg = choices[0].GetProperty("message");
-                if (msg.TryGetProperty("content", out var content))
-                {
-                    var s = content.GetString();
-                    if (!string.IsNullOrWhiteSpace(s)) return (s.Trim(), null);
-                }
-                return (null, "返回内容为空");
+                return ParseChatResponse(text);
             }
             catch (Exception ex) { return (null, "解析响应失败：" + ex.Message); }
         }
         catch (TaskCanceledException) { return (null, "请求超时"); }
         catch (Exception ex) { return (null, ex.Message); }
+    }
+
+    /// <summary>
+    /// 解析 chat/completions 的响应。抽成静态方法是为了能单测。
+    /// <para>
+    /// 关键是要分清「正文为空」和「正文被 token 预算截断」：
+    /// 两者在响应里长得几乎一样（content 都是空串），
+    /// 但前者无解、后者加大预算就能救，所以报错文案必须不一样。
+    /// </para>
+    /// </summary>
+    internal static (string? Text, string? Error) ParseChatResponse(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        if (!doc.RootElement.TryGetProperty("choices", out var choices) || choices.GetArrayLength() == 0)
+            return (null, "返回内容为空");
+        var choice = choices[0];
+        var msg = choice.GetProperty("message");
+
+        // finish_reason=length 表示 max_tokens 用完了、正文被截断
+        var truncated = choice.TryGetProperty("finish_reason", out var fr) &&
+                        string.Equals(fr.GetString(), "length", StringComparison.OrdinalIgnoreCase);
+        var hasReasoning = msg.TryGetProperty("reasoning_content", out var rc) &&
+                           !string.IsNullOrWhiteSpace(rc.GetString());
+
+        if (msg.TryGetProperty("content", out var content))
+        {
+            var s = content.GetString();
+            if (!string.IsNullOrWhiteSpace(s)) return (s.Trim(), null);
+        }
+
+        if (truncated)
+            return (null, hasReasoning
+                ? "回答被 token 预算截断了（思考模式把预算用完了），正文没输出"
+                : "回答被 token 预算截断了");
+        if (hasReasoning)
+            return (null, "模型只返回了思考过程、没有正文");
+        return (null, "返回内容为空");
+    }
+
+    /// <summary>
+    /// 读响应正文，**按 UTF-8 显式解码**。
+    /// <para>
+    /// DeepSeek 回的 Content-Type 只有 "application/json"，**不带 charset**。
+    /// JSON 的默认编码按 RFC 8259 就是 UTF-8，所以这里自己解，不赌运行时的默认值。
+    /// </para>
+    /// </summary>
+    private static async Task<string> ReadBodyAsync(HttpResponseMessage resp, CancellationToken ct)
+    {
+        var bytes = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+        return DecodeBody(bytes, resp.Content.Headers.ContentType?.CharSet);
+    }
+
+    /// <summary>按 charset（可空）解码响应字节；没给 charset 就按 UTF-8。</summary>
+    internal static string DecodeBody(byte[] bytes, string? charset)
+    {
+        if (!string.IsNullOrEmpty(charset))
+        {
+            try { return Encoding.GetEncoding(charset.Trim('"')).GetString(bytes); }
+            catch { /* 编码名不认识就按 UTF-8 */ }
+        }
+        return Encoding.UTF8.GetString(bytes);
     }
 
     private const string SystemPrompt =

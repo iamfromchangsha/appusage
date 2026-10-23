@@ -43,6 +43,8 @@ internal static class SelfTest
             TestShotPathFormat();
         TestShotNaming();
         TestShotIndexLookup();
+        TestAiDecoding();
+        TestAiResponseParsing();
 
             Console.WriteLine();
             Console.WriteLine($"自测完成：{_pass} 通过，{_fails.Count} 失败");
@@ -390,6 +392,73 @@ internal static class SelfTest
         Eq(name, ShotService.NormalizeName("2026-10-23_15-04-05_msedge"), "日期前缀从键名里剥掉");
         Eq(name, ShotService.NormalizeName(name), "没有前缀就原样返回");
         Eq("foo_bar", ShotService.NormalizeName("foo_bar"), "非日期前缀不动");
+    }
+
+    /// <summary>
+    /// 回归：AI 返回的 Content-Type 是 "application/json"（**不带 charset**），
+    /// 中文正文必须按 UTF-8 解出来，不能变成 Latin-1 乱码。
+    /// </summary>
+    private static void TestAiDecoding()
+    {
+        Console.WriteLine("— AI 响应解码 —");
+        const string cn = "今天主要在刷粉笔题，浏览占六成。";
+        var utf8 = System.Text.Encoding.UTF8.GetBytes(cn);
+
+        // 服务端不给 charset → 按 UTF-8
+        var s1 = AiClient.DecodeBody(utf8, null);
+        Eq(cn, s1, "没有 charset 时按 UTF-8 解出中文");
+
+        var s2 = AiClient.DecodeBody(utf8, "   ");
+        Eq(cn, s2, "charset 是空白也按 UTF-8");
+
+        // 给了 charset 就按它来
+        var s3 = AiClient.DecodeBody(System.Text.Encoding.UTF8.GetBytes(cn), "utf-8");
+        Eq(cn, s3, "指定 utf-8 时正常");
+
+        // 认识的编码按它解（这里用 latin1 验证真的切换了编码）
+        var latin1 = System.Text.Encoding.GetEncoding("iso-8859-1").GetBytes("abc");
+        var s4 = AiClient.DecodeBody(latin1, "iso-8859-1");
+        Eq("abc", s4, "指定 latin1 时按 latin1 解");
+
+        // 不认识的编码名 → 退回 UTF-8，不能抛异常
+        var s5 = AiClient.DecodeBody(utf8, "totally-not-a-charset");
+        Eq(cn, s5, "不认识的编码名退回 UTF-8");
+    }
+
+    /// <summary>
+    /// 回归：思考模式下推理 token 吃光 max_tokens，正文会是空的
+    /// （finish_reason=length，content 长度 0）——必须能识别出来并给出可操作的提示，
+    /// 而不是笼统的「返回内容为空」。
+    /// </summary>
+    private static void TestAiResponseParsing()
+    {
+        Console.WriteLine("— AI 响应解析 —");
+
+        // 正常响应
+        var ok = AiClient.ParseChatResponse(
+            """{"choices":[{"finish_reason":"stop","message":{"content":"  今天主要在刷粉笔题。  ","reasoning_content":"想了一下"}}]}""");
+        Eq("今天主要在刷粉笔题。", ok.Text ?? "", "正常响应取出正文并去空白");
+        Check(ok.Error is null, "正常响应没有错误");
+
+        // 被 token 预算截断：正文空 + finish_reason=length
+        var cut = AiClient.ParseChatResponse(
+            """{"choices":[{"finish_reason":"length","message":{"content":"","reasoning_content":"推理很长"}}]}""");
+        Check(cut.Text is null, "截断时没有正文");
+        Check(cut.Error is not null && cut.Error.Contains("截断"), "截断时明确说被截断", cut.Error ?? "");
+
+        // 只返回了思考过程
+        var onlyReason = AiClient.ParseChatResponse(
+            """{"choices":[{"finish_reason":"stop","message":{"content":"","reasoning_content":"只有推理"}}]}""");
+        Check(onlyReason.Error is not null && onlyReason.Error.Contains("思考"), "只回思考过程时提示明确", onlyReason.Error ?? "");
+
+        // 真的什么都没有
+        var empty = AiClient.ParseChatResponse(
+            """{"choices":[{"finish_reason":"stop","message":{"content":""}}]}""");
+        Check(empty.Error is not null && empty.Error.Contains("空"), "空正文时报「返回内容为空」", empty.Error ?? "");
+
+        // choices 为空
+        var noChoice = AiClient.ParseChatResponse("""{"choices":[]}""");
+        Check(noChoice.Error is not null && noChoice.Error.Contains("空"), "choices 为空时报空", noChoice.Error ?? "");
     }
 
     /// <summary>

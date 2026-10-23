@@ -331,8 +331,10 @@ internal sealed class SettingsForm : Form
         try
         {
             using var ai = new AiClient(_config);
-            var err = await ai.TestAsync(CancellationToken.None);
-            _aiStatus.Text = err is null ? "✓ 连接正常，模型可用" : "✗ " + err;
+            var (reply, err) = await ai.TestAsync(CancellationToken.None);
+            _aiStatus.Text = err is null
+                ? "✓ 连接正常，模型可用" + (reply is not null ? $"（回复：{reply}）" : "")
+                : "✗ " + err;
             _aiStatus.ForeColor = err is null ? Theme.Accent2 : Theme.Danger;
         }
         catch (Exception ex)

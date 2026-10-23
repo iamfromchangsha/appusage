@@ -16,6 +16,8 @@ internal static class Program
         bool cliMode = args.Any(a =>
             a.Equals("--selftest", StringComparison.OrdinalIgnoreCase) ||
             a.Equals("--memcheck", StringComparison.OrdinalIgnoreCase) ||
+            a.Equals("--test-ai", StringComparison.OrdinalIgnoreCase) ||
+            a.Equals("--ai-summary", StringComparison.OrdinalIgnoreCase) ||
             a.Equals("--dump", StringComparison.OrdinalIgnoreCase) ||
             a.Equals("--test-shot", StringComparison.OrdinalIgnoreCase));
         if (cliMode) ConsoleHost.Attach();
@@ -69,6 +71,45 @@ internal static class Program
                 if (memIdx + 1 < args.Length && int.TryParse(args[memIdx + 1], out var parsed))
                     memDays = parsed;
                 return MemCheck.Run(memDays);
+            }
+
+            // AI 自检：--test-ai 用真实 AiClient 跑一次，验证 key / 模型 / 编码
+            if (args.Any(a => a.Equals("--test-ai", StringComparison.OrdinalIgnoreCase)))
+            {
+                using var ai = new AiClient(config);
+                // 同步等，不用 await —— Main 要是 async，await 之后的代码会跑到线程池线程上，
+                // 而 WinForms 的消息循环必须在 STA 线程
+                var (aiText, aiErr) = ai.TestAsync(CancellationToken.None).GetAwaiter().GetResult();
+                if (aiErr is not null)
+                {
+                    Console.WriteLine("✗ " + aiErr);
+                    return 1;
+                }
+                Console.WriteLine("✓ 连接正常");
+                Console.WriteLine("模型回复：" + aiText);
+                return 0;
+            }
+
+            // AI 总结：--ai-summary [yyyy-MM-dd] 生成某天的总结（默认今天）
+            int sumIdx = Array.FindIndex(args, a => a.Equals("--ai-summary", StringComparison.OrdinalIgnoreCase));
+            if (sumIdx >= 0)
+            {
+                var sumDay = DateTime.Today;
+                if (sumIdx + 1 < args.Length && DateTime.TryParse(args[sumIdx + 1], out var parsedDay))
+                    sumDay = parsedDay.Date;
+
+                store.Reload();
+                var report = ReportBuilder.Build(store, config, sumDay, DateTime.Today);
+                using var ai = new AiClient(config);
+                var (sumText, sumErr) = ai.SummarizeAsync(report, CancellationToken.None).GetAwaiter().GetResult();
+                if (sumErr is not null)
+                {
+                    Console.WriteLine("✗ " + sumErr);
+                    return 1;
+                }
+                Console.WriteLine($"===== {sumDay:yyyy-MM-dd} AI 总结 =====");
+                Console.WriteLine(sumText);
+                return 0;
             }
 
             // 调试用：--test-shot 抓一张当前前台窗口的图，验证截图链路
