@@ -16,14 +16,17 @@ internal sealed class ShotUploader : IDisposable
         _http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
     }
 
-    public bool Configured => _config.Shots.HasGithub;
+    public bool Configured => _config.Shots.HasGithub
+                              && TokenUtil.Extract(_config.Shots.GithubToken, TokenUtil.GitHubPattern).Length > 0;
 
     public string Owner => _config.Shots.GithubOwner;
     public string Repo => _config.Shots.GithubRepo;
 
     private void Prepare(HttpRequestMessage req)
     {
-        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.Shots.GithubToken);
+        // token 可能被粘进了多余内容，这里再洗一次
+        var token = TokenUtil.Extract(_config.Shots.GithubToken, TokenUtil.GitHubPattern);
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         req.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
         req.Headers.UserAgent.ParseAdd("AppUsage");
@@ -63,7 +66,12 @@ internal sealed class ShotUploader : IDisposable
         {
             using var resp = await _http.SendAsync(check, ct).ConfigureAwait(false);
             if (resp.IsSuccessStatusCode) return null;
-            if ((int)resp.StatusCode != 404) return $"仓库检查失败：HTTP {(int)resp.StatusCode}";
+            if ((int)resp.StatusCode != 404)
+                return $"仓库检查失败：HTTP {(int)resp.StatusCode}";
+            // 404 有两种可能：仓库真不存在，或者这个 PAT 没被授权访问它
+            // （GitHub 对没权限的私有仓库返回 404 而不是 403）
+            return $"仓库 {Owner}/{Repo} 不存在，或这个 PAT 没有它的访问权限" +
+                   $"（私有仓库对未授权的 token 会返回 404，不是 403）";
         }
 
         if (!_config.Shots.AutoCreateRepo) return $"仓库 {Owner}/{Repo} 不存在，且未开启自动创建";
@@ -82,6 +90,32 @@ internal sealed class ShotUploader : IDisposable
         Prepare(create);
         using (create)
             return await SendAsync(create, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>列出这个 token 实际能访问的仓库（fine-grained PAT 只能看到被授权的）。</summary>
+    public async Task<List<(string FullName, bool Private)>> ListRepositoriesAsync(CancellationToken ct)
+    {
+        var list = new List<(string, bool)>();
+        if (!Configured) return list;
+        var req = new HttpRequestMessage(HttpMethod.Get,
+            "https://api.github.com/user/repos?per_page=100&affiliation=owner,collaborator");
+        Prepare(req);
+        try
+        {
+            using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode) return list;
+            var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(body);
+            if (!doc.RootElement.TryGetProperty("name", out _)) return list;
+            foreach (var r in doc.RootElement.EnumerateArray())
+            {
+                var full = r.GetProperty("full_name").GetString() ?? "";
+                var priv = r.TryGetProperty("private", out var pv) && pv.GetBoolean();
+                if (full.Length > 0) list.Add((full, priv));
+            }
+        }
+        catch { }
+        return list;
     }
 
     /// <summary>上传一张图（内容 base64）。返回 null 表示成功。</summary>

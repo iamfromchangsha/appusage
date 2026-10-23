@@ -118,12 +118,18 @@
 
 ### GitHub PAT 怎么拿
 
+> ⚠️ **最容易踩的坑**：fine-grained PAT 有**仓库白名单**。
+> 如果 `appusage-shots` 不在白名单里，GitHub 对这个私有仓会返回 **404（而不是 403）**，
+> 程序只会显示「Not Found」，很容易以为是仓库不存在。
+> **建 token 时一定要在 Repository access 里勾上 `appusage-shots`**
+> （仓库建好之后再去加也行，但改完权限 token 字符串会变，要重新复制一次）。
+
 1. 打开 <https://github.com/settings/personal-access-tokens/new>（或
    Settings → Developer settings → Personal access tokens → **Fine-grained tokens** → Generate new token）
 2. **Token name** 填 `AppUsage`，Expiration 选最长（1 年）
 3. **Resource owner**：选你的账号（`iamfromchangsha`）
 4. **Repository access**：选 **Only select repositories** → 勾选 `appusage-shots`
-   （私有仓已建好；若还没建，先选 Public repositories 生成也行）
+   （私有仓已建好；若勾不到，先在 <https://github.com/new> 建一个同名私有仓）
 5. **Repository permissions → Contents → Read and write**（**只开这一项**，别的都不用）
 6. Generate token → **立刻复制** `github_pat_...`（只显示一次）
 
@@ -139,9 +145,18 @@
 点「**测试 / 创建仓库**」→ 出现绿色的「✓ 仓库 iamfromchangsha/appusage-shots 可用」就成了，
 再点「保存」。
 
+**报 404 怎么办**：点「**载入可见仓库**」，程序会列出这个 token 实际能访问的仓库（私有/公开都标出来），
+从下拉里选一个填进去即可。
+——但注意：**选公开仓库 = 你的截图所有人可见**，所以更推荐把 `appusage-shots`
+加进 PAT 的白名单（见上面第 4 步）。
+
 > **Token 存在哪**：`config.json`（本机明文）。这个文件**已加入 .gitignore 且不再被 git 跟踪**，
 > 所以不会被提交到仓库；仓库里只有不含密钥的 `config.example.json` 模板。
 > 随时可以去 GitHub 设置里吊销，程序会提示 token 无效并暂停上传。
+>
+> **粘贴时会自动只取 token 本身**（正则匹配），不会因为你顺手把另一个 key 也粘进来就串味；
+> 万一串了，保存时也会自动纠正。
+
 
 
 ---

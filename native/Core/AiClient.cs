@@ -17,7 +17,7 @@ internal sealed class AiClient : IDisposable
     }
 
     public bool Configured => _config.Ai.Enabled
-                              && _config.Ai.ApiKey.Length > 0
+                              && TokenUtil.Extract(_config.Ai.ApiKey, TokenUtil.AiPattern).Length > 0
                               && _config.Ai.BaseUrl.Length > 0;
 
     private HttpRequestMessage BuildRequest(object body)
@@ -26,7 +26,9 @@ internal sealed class AiClient : IDisposable
         {
             Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"),
         };
-        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.Ai.ApiKey);
+        // key 也可能被粘进多余内容，用之前洗一次
+        var key = TokenUtil.Extract(_config.Ai.ApiKey, TokenUtil.AiPattern);
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
         return req;
     }
 

@@ -1,4 +1,5 @@
-using System.Drawing;
+﻿using System.Drawing;
+using System.Text.RegularExpressions;
 using AppUsage.Core;
 
 namespace AppUsage.Ui;
@@ -22,6 +23,7 @@ internal sealed class SettingsForm : Form
     private readonly TextBox _ghRepo = new();
     private readonly CheckBox _ghAuto = new() { Text = "仓库不存在时自动创建（私有）", AutoSize = true };
     private readonly Label _ghStatus = new() { AutoSize = false, Height = 20 };
+    private readonly ComboBox _ghRepoList = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 320 };
 
     private readonly CheckBox _shotEnabled = new() { Text = "启用随机使用截图", AutoSize = true };
     private readonly NumericUpDown _shotInterval = new() { Minimum = 5, Maximum = 240, Increment = 5 };
@@ -60,7 +62,7 @@ internal sealed class SettingsForm : Form
             Padding = new Padding(P(16)),
         };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(196)));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(176)));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(214)));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(188)));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
@@ -114,10 +116,10 @@ internal sealed class SettingsForm : Form
         card.Dock = DockStyle.Fill;
         card.Margin = new Padding(0, 0, 0, P(8));
 
-        var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 5, BackColor = Theme.Panel };
+        var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 6, BackColor = Theme.Panel };
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, P(96)));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        for (int i = 0; i < 4; i++) grid.RowStyles.Add(new RowStyle(SizeType.Absolute, P(26)));
+        for (int i = 0; i < 5; i++) grid.RowStyles.Add(new RowStyle(SizeType.Absolute, P(26)));
         grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         AddRow(grid, 0, "Token", _ghToken);
@@ -128,12 +130,18 @@ internal sealed class SettingsForm : Form
         var opts = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = Color.Transparent };
         var test = MakeButton("测试 / 创建仓库");
         test.Click += async (_, _) => await TestGithubAsync(test);
+        var listBtn = MakeButton("载入可见仓库");
+        listBtn.Click += async (_, _) => await LoadVisibleReposAsync(listBtn);
         opts.Controls.Add(test);
+        opts.Controls.Add(listBtn);
         grid.Controls.Add(opts, 1, 4);
 
         _ghStatus.ForeColor = Theme.Muted2;
         _ghStatus.Font = new Font("Segoe UI", 7.8f);
         grid.Controls.Add(_ghStatus, 1, 4);
+
+        _ghRepoList.Dock = DockStyle.Fill;
+        grid.Controls.Add(_ghRepoList, 1, 5);
 
         var warn = new Label
         {
@@ -223,8 +231,21 @@ internal sealed class SettingsForm : Form
         grid.Controls.Add(control, 1, row);
     }
 
-    private static Button MakeButton(string text)
+    /// <summary>
+    /// 粘贴 / 保存时从文本里「只取出 token 本身」。
+    /// 防的是这种手滑：先粘了 PAT，又把另一个 key 粘进同一个框，拼成一长串 → 鉴权 401。
+    /// </summary>
+    private static string Sanitize(TextBox box, string pattern)
     {
+        var clean = TokenUtil.Extract(box.Text, pattern);
+        if (clean != box.Text) box.Text = clean;
+        return clean;
+    }
+
+    private const string GitHubTokenPattern = TokenUtil.GitHubPattern;
+    private const string AiKeyPattern = TokenUtil.AiPattern;
+
+    private static Button MakeButton(string text)    {
         var b = new Button
         {
             Text = text,
@@ -262,6 +283,19 @@ internal sealed class SettingsForm : Form
         _shotInterval.Value = Math.Clamp(s.IntervalMinutes, 5, 240);
         _shotMax.Value = Math.Clamp(s.MaxPerDay, 1, 100);
         _shotExcluded.Text = string.Join(", ", s.Excluded);
+
+        // 仓库下拉：选中即填入拥有者 / 仓库名
+        _ghRepoList.SelectedIndexChanged += (_, _) =>
+        {
+            if (_ghRepoList.SelectedItem is not string item) return;
+            var text = item.Split("  （")[0];
+            var parts = text.Split('/');
+            if (parts.Length == 2)
+            {
+                _ghOwner.Text = parts[0];
+                _ghRepo.Text = parts[1];
+            }
+        };
     }
 
     private void SaveToConfig()
@@ -269,7 +303,7 @@ internal sealed class SettingsForm : Form
         var ai = _config.Ai;
         ai.Enabled = _aiEnabled.Checked;
         ai.BaseUrl = _aiBase.Text.Trim();
-        ai.ApiKey = _aiKey.Text.Trim();
+        ai.ApiKey = Sanitize(_aiKey, AiKeyPattern);
         ai.Model = _aiModel.SelectedItem?.ToString() ?? "deepseek-v4-pro";
         ai.Thinking = _aiThinking.Checked;
         ai.IncludeTopics = _aiTopics.Checked;
@@ -278,7 +312,7 @@ internal sealed class SettingsForm : Form
         s.Enabled = _shotEnabled.Checked;
         s.IntervalMinutes = (int)_shotInterval.Value;
         s.MaxPerDay = (int)_shotMax.Value;
-        s.GithubToken = _ghToken.Text.Trim();
+        s.GithubToken = Sanitize(_ghToken, GitHubTokenPattern);
         s.GithubOwner = _ghOwner.Text.Trim();
         s.GithubRepo = _ghRepo.Text.Trim();
         s.AutoCreateRepo = _ghAuto.Checked;
@@ -313,6 +347,42 @@ internal sealed class SettingsForm : Form
         }
     }
 
+    /// <summary>列出这个 PAT 实际能访问的仓库，让用户直接选一个能用的。</summary>
+    private async Task LoadVisibleReposAsync(Button btn)
+    {
+        SaveToConfig();
+        btn.Enabled = false;
+        btn.Text = "读取中…";
+        try
+        {
+            using var up = new ShotUploader(_config);
+            var repos = await up.ListRepositoriesAsync(CancellationToken.None);
+            _ghRepoList.Items.Clear();
+            foreach (var (full, priv) in repos)
+                _ghRepoList.Items.Add(priv ? full + "  （私有）" : full + "  （公开）");
+            if (_ghRepoList.Items.Count == 0)
+            {
+                _ghStatus.Text = "这个 token 看不到任何仓库";
+                _ghStatus.ForeColor = Theme.Danger;
+            }
+            else
+            {
+                _ghStatus.Text = $"这个 token 能访问 {repos.Count} 个仓库，已列在下面（选中即填入）";
+                _ghStatus.ForeColor = Theme.Muted2;
+            }
+        }
+        catch (Exception ex)
+        {
+            _ghStatus.Text = "✗ " + ex.Message;
+            _ghStatus.ForeColor = Theme.Danger;
+        }
+        finally
+        {
+            btn.Enabled = true;
+            btn.Text = "载入可见仓库";
+        }
+    }
+
     private async Task TestGithubAsync(Button btn)
     {
         SaveToConfig();
@@ -322,10 +392,22 @@ internal sealed class SettingsForm : Form
         {
             using var up = new ShotUploader(_config);
             var err = await up.EnsureRepoAsync(CancellationToken.None);
-            _ghStatus.Text = err is null
-                ? $"✓ 仓库 {_ghOwner.Text}/{_ghRepo.Text} 可用"
-                : "✗ " + err;
-            _ghStatus.ForeColor = err is null ? Theme.Accent2 : Theme.Danger;
+            if (err is null)
+            {
+                _ghStatus.Text = $"✓ 仓库 {_ghOwner.Text}/{_ghRepo.Text} 可用";
+                _ghStatus.ForeColor = Theme.Accent2;
+            }
+            else
+            {
+                _ghStatus.Text = "✗ " + err;
+                _ghStatus.ForeColor = Theme.Danger;
+                // token 长度异常是最常见的手滑：多粘了别的内容
+                if (err.Contains("401") && _ghToken.Text.Length > 93)
+                {
+                    _ghStatus.Text += $"（当前 token 长度 {_ghToken.Text.Length}，正常 fine-grained PAT 是 93 字符，" +
+                                      "多半是粘贴时带上了多余内容——重新粘贴一次即可，程序会只取 token 本身）";
+                }
+            }
         }
         catch (Exception ex)
         {

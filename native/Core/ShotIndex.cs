@@ -9,6 +9,8 @@ internal static class ShotIndex
         var dir = Path.Combine(dataDir, "shots", "thumbs", day.ToString("yyyy-MM-dd"));
         if (!Directory.Exists(dir)) return result;
 
+        var uploaded = ReadManifest(dataDir);
+
         foreach (var file in Directory.GetFiles(dir, "*.jpg").OrderBy(f => f, StringComparer.Ordinal))
         {
             var name = Path.GetFileNameWithoutExtension(file);
@@ -21,10 +23,30 @@ internal static class ShotIndex
                 ThumbPath = file,
                 App = app,
                 At = day.Date + time,
-                GithubUrl = BlobUrl(config, day, name),
+                // 只有真传上去的才给 GitHub 链接，避免点开 404
+                GithubUrl = uploaded.ContainsKey(name) ? BlobUrl(config, day, name) : string.Empty,
+                Uploaded = uploaded.ContainsKey(name),
             });
         }
         return result;
+    }
+
+    /// <summary>读上传清单：本地缩略图名 → GitHub 相对路径。</summary>
+    private static Dictionary<string, string> ReadManifest(string dataDir)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var path = Path.Combine(dataDir, "shots", "index.tsv");
+        if (!File.Exists(path)) return map;
+        try
+        {
+            foreach (var line in File.ReadAllLines(path))
+            {
+                var parts = line.Split('\t');
+                if (parts.Length >= 2) map[parts[0]] = parts[1];
+            }
+        }
+        catch { }
+        return map;
     }
 
     public static string BlobUrl(Config config, DateTime day, string name)

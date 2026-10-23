@@ -37,7 +37,16 @@ internal sealed class ShotService : IDisposable
     /// <summary>上传器懒加载：不开启截图时就不用把 HttpClient / JSON 序列化器拖进内存。</summary>
     private ShotUploader? Uploader => _uploader ??= _config.Shots.HasGithub ? new ShotUploader(_config) : null;
 
-    public void Start() { _running = true; Current = this; _thread.Start(); }
+    public void Start()
+    {
+        _running = true;
+        Current = this;
+        Program.Trace($"[shots] 启动：enabled={_config.Shots.Enabled} token={_config.Shots.GithubToken.Length}字符 " +
+                      $"owner={_config.Shots.GithubOwner} repo={_config.Shots.GithubRepo} " +
+                      $"interval={_config.Shots.IntervalMinutes}分 max={_config.Shots.MaxPerDay} " +
+                      $"dataDir={_dataDir}");
+        _thread.Start();
+    }
 
     public void Stop() { _running = false; }
 
@@ -56,7 +65,7 @@ internal sealed class ShotService : IDisposable
             try { Thread.Sleep(3000); } catch { break; }
             if (!_running) break;
             try { MaybeCapture(); }
-            catch { /* 单次失败不影响下一轮 */ }
+            catch (Exception ex) { Program.Trace("[shots] 采集异常: " + ex); }
         }
     }
 
@@ -64,6 +73,7 @@ internal sealed class ShotService : IDisposable
     {
         if (Status == s) return;
         Status = s;
+        Program.Trace($"[shots] {s}");
         try { StatusChanged?.Invoke(s); } catch { }
     }
 
@@ -75,6 +85,7 @@ internal sealed class ShotService : IDisposable
         var now = DateTime.Now;
         if (now < _nextDue) return;
         _nextDue = now.AddMinutes(Math.Max(1, shots.IntervalMinutes));
+        Program.Trace($"[shots] 尝试截图（间隔 {shots.IntervalMinutes} 分钟）");
 
         // 磁盘保护
         try
@@ -101,14 +112,26 @@ internal sealed class ShotService : IDisposable
         if (NativeMethods.IdleSeconds() > 120) { SetStatus("空闲中，暂不截图"); return; }
 
         var hwnd = NativeMethods.GetForegroundWindow();
-        if (hwnd == IntPtr.Zero) return;
+        if (hwnd == IntPtr.Zero) { SetStatus("没有前台窗口"); return; }
 
         var (exe, title, _) = NativeMethods.GetForeground();
         var appKey = _config.AppKey(exe, title);
-        if (shots.Excluded.Any(e => string.Equals(e, appKey, StringComparison.OrdinalIgnoreCase))) return;
-        if (_config.ExcludedExes.Any(e => string.Equals(e, appKey, StringComparison.OrdinalIgnoreCase))) return;
+        if (shots.Excluded.Any(e => string.Equals(e, appKey, StringComparison.OrdinalIgnoreCase)))
+        {
+            SetStatus($"已跳过 {appKey}（在排除列表里）");
+            return;
+        }
+        if (_config.ExcludedExes.Any(e => string.Equals(e, appKey, StringComparison.OrdinalIgnoreCase)))
+        {
+            SetStatus($"已跳过 {appKey}（全局排除）");
+            return;
+        }
 
-        if (!Screenshotter.TryCapture(hwnd, shots.FullWidth, shots.JpegQuality, out var jpeg)) return;
+        if (!Screenshotter.TryCapture(hwnd, shots.FullWidth, shots.JpegQuality, out var jpeg))
+        {
+            SetStatus("抓图失败（黑图或窗口不可抓）");
+            return;
+        }
 
         var name = $"{now:HH-mm-ss}_{Sanitize(appKey)}";
         SaveThumb(todayDir, name, jpeg, shots.ThumbWidth, shots.JpegQuality);
@@ -134,12 +157,15 @@ internal sealed class ShotService : IDisposable
             if (err is null)
             {
                 _consecutiveFailures = 0;
+                RecordUploaded(name, relPath);
                 SetStatus("截图已存 GitHub 私有仓库");
                 return;
             }
             if (err.Contains("401") || err.Contains("Bad credentials"))
             {
-                SetStatus("GitHub token 无效，暂停上传");
+                // token 无效也先把图存下来，别白抓一次
+                SaveOutbox(name, jpeg, at);
+                SetStatus($"GitHub token 无效（{err}），图片暂存本地，暂停上传");
                 return;
             }
             SaveOutbox(name, jpeg, at);
@@ -172,6 +198,7 @@ internal sealed class ShotService : IDisposable
                 if (err is null)
                 {
                     try { File.Delete(f); } catch { }
+                    RecordUploaded(name, rel);
                     SetStatus("已补传历史截图");
                 }
             }
@@ -179,8 +206,23 @@ internal sealed class ShotService : IDisposable
         }
     }
 
-    private void SaveThumb(string dir, string name, byte[] jpeg, int thumbWidth, int quality)
+    /// <summary>上传成功的截图清单（本地文件 → GitHub 路径），只有真传上去的才给 GitHub 链接。</summary>
+    public string ManifestPath => Path.Combine(_dataDir, "shots", "index.tsv");
+
+    private void RecordUploaded(string name, string relPath)
     {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(ManifestPath)!);
+            var line = name + "\t" + relPath + "\n";
+            var existing = File.Exists(ManifestPath) ? File.ReadAllText(ManifestPath) : "";
+            if (!existing.Contains(name + "\t", StringComparison.Ordinal))
+                File.AppendAllText(ManifestPath, line);
+        }
+        catch { }
+    }
+
+    private void SaveThumb(string dir, string name, byte[] jpeg, int thumbWidth, int quality)    {
         try
         {
             Directory.CreateDirectory(dir);
