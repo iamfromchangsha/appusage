@@ -18,6 +18,7 @@ internal static class Program
             a.Equals("--memcheck", StringComparison.OrdinalIgnoreCase) ||
             a.Equals("--test-ai", StringComparison.OrdinalIgnoreCase) ||
             a.Equals("--ai-summary", StringComparison.OrdinalIgnoreCase) ||
+            a.Equals("--backup", StringComparison.OrdinalIgnoreCase) ||
             a.Equals("--dump", StringComparison.OrdinalIgnoreCase) ||
             a.Equals("--test-shot", StringComparison.OrdinalIgnoreCase));
         if (cliMode) ConsoleHost.Attach();
@@ -142,6 +143,24 @@ internal static class Program
                 File.WriteAllText(path, ReportDump.Format(report, store, config), new System.Text.UTF8Encoding(false));
                 Console.WriteLine(path);
                 return 0;
+            }
+
+            // 备份：--backup [目标目录] 把使用记录打成 ZIP
+            int bakIdx = Array.FindIndex(args, a => a.Equals("--backup", StringComparison.OrdinalIgnoreCase));
+            if (bakIdx >= 0)
+            {
+                string? bakDest = bakIdx + 1 < args.Length ? args[bakIdx + 1] : null;
+                try
+                {
+                    var zip = DataBackup.Create(paths.DataDir, paths.ConfigPath, bakDest);
+                    Console.WriteLine(zip);
+                    return 0;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("备份失败: " + ex);
+                    return 1;
+                }
             }
 
             // 到这里才是真正的常驻运行：才允许开追踪和随机截图

@@ -223,6 +223,17 @@ internal sealed class SettingsForm : Form
         sites.Location = new Point(P(0), P(8));
         sites.Click += (_, _) => EditSiteHints();
 
+        // 数据相关：使用记录只躺在应用目录里，得给用户一个备份 / 查看的入口
+        var openDir = MakeButton("打开数据目录");
+        openDir.Size = new Size(P(108), P(30));
+        openDir.Location = new Point(P(110), P(8));
+        openDir.Click += (_, _) => OpenDataFolder();
+
+        var backup = MakeButton("备份数据");
+        backup.Size = new Size(P(88), P(30));
+        backup.Location = new Point(P(224), P(8));
+        backup.Click += (_, _) => BackupData();
+
         panel.Resize += (_, _) =>
         {
             save.Location = new Point(panel.ClientSize.Width - P(100), P(8));
@@ -231,14 +242,20 @@ internal sealed class SettingsForm : Form
         panel.Controls.Add(save);
         panel.Controls.Add(cancel);
         panel.Controls.Add(sites);
+        panel.Controls.Add(openDir);
+        panel.Controls.Add(backup);
 
         // 自动化验证用：把按钮的屏幕坐标写进 trace
         panel.HandleCreated += (_, _) =>
         {
             try
             {
-                var sp = sites.PointToScreen(new Point(sites.Width / 2, sites.Height / 2));
-                Program.Trace($"settings site hints button screen = {sp.X},{sp.Y}");
+                foreach (var (name, b) in new (string, Button)[]
+                         { ("sitehints", sites), ("opendir", openDir), ("backup", backup) })
+                {
+                    var sp = b.PointToScreen(new Point(b.Width / 2, b.Height / 2));
+                    Program.Trace($"settings {name} button screen = {sp.X},{sp.Y}");
+                }
             }
             catch { /* ignore */ }
         };
@@ -255,6 +272,36 @@ internal sealed class SettingsForm : Form
         var (hints, names) = dlg.Result;
         _config.SiteHints = hints;
         _config.SiteNames = names;
+    }
+
+    /// <summary>打开数据目录（logs / 截图 / 配置都在这儿）。</summary>
+    private void OpenDataFolder()
+    {
+        try
+        {
+            Directory.CreateDirectory(_paths.DataDir);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(_paths.DataDir)
+            { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("打不开数据目录：" + ex.Message, "应用使用时长", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    /// <summary>把使用记录打成 ZIP 放到桌面（配置里的密钥会被抹掉）。</summary>
+    private void BackupData()
+    {
+        try
+        {
+            var path = DataBackup.Create(_paths.DataDir, _paths.ConfigPath);
+            MessageBox.Show($"已备份到：\n{path}\n\n（配置里的 API Key 和 PAT 没有包含在内，恢复后要自己重新填）",
+                "备份完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("备份失败：" + ex.Message, "应用使用时长", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
     }
 
     private void AddRow(TableLayoutPanel grid, int row, string label, Control control)

@@ -18,7 +18,7 @@
 | 看每日汇报 | 主界面顶栏「📋 日报」按钮，或点热力图任意格子 |
 | 按别的口径看应用 | 主界面「应用明细」表**点列头排序**（再点一次换方向，▲ 升 / ▼ 降） |
 | 控制台菜单 | 双击 `AppUsage.cmd` |
-| 改设置 | 日报页右上角 ⚙（DeepSeek / GitHub 私有仓 / 截图 / 站点关键词） |
+| 改设置 | 日报页右上角 ⚙（DeepSeek / GitHub 私有仓 / 截图 / 站点关键词 / 备份数据） |
 
 > **开机自启**走托盘模式（`--tray`）。程序会往「启动」文件夹丢一个快捷方式，
 > 但**会核对快捷方式指向的程序还在不在**——程序被挪过位置的话，界面会直接告诉你
@@ -313,6 +313,7 @@ AppUsage.exe --selftest   跑内置自测（137 个用例），结果同时写�
 AppUsage.exe --memcheck [天数]  造合成日志量内存占用（默认 30 天，可传 365 看一年）
 AppUsage.exe --test-ai    测 DeepSeek 连接（模型回复会打印出来，用来验证中文没乱码）
 AppUsage.exe --ai-summary [yyyy-MM-dd]  生成某天的 AI 总结并打印（默认今天）
+AppUsage.exe --backup [目标目录]   把使用记录打成 ZIP（默认放桌面，密钥会被抹掉）
 AppUsage.exe --dump <yyyy-MM-dd>  把某天的日报导出成 data\report-dump.txt（调试用）
 AppUsage.exe --test-shot  抓一张当前前台窗口的图（自测截图链路用）
 ```
@@ -371,6 +372,7 @@ native/
 │  ├─ SiteHintsCodec.cs     站点词表的文本编解码（设置页编辑用）
 │  ├─ ReportModel.cs        日报数据模型
 │  ├─ AppSorter.cs          应用明细表的排序
+│  ├─ DataBackup.cs         打包使用记录（密钥抹掉）
 │  ├─ ReportBuilder.cs      从 Store 装配日报（纯函数、离线）
 │  ├─ SelfTest.cs           内置自测用例（--selftest）
 │  ├─ TokenUtil.cs          凭据提取（按固定长度截取，避免粘串）
@@ -412,6 +414,25 @@ native/
 - 远程桌面 / 锁屏期间视同空闲，不会计时长。
 - 换了 exe 名就认成新应用，升级改名的软件历史会断档。
 - 纯前台轮询，秒级精度约 ±1 秒。
+
+---
+
+## 数据备份
+
+使用记录是这个程序最值钱的东西，却只躺在应用目录的 `dist\data\logs\` 里——
+换应用、删文件夹、磁盘出点事，几年的记录就没了。
+
+**设置页 →「备份数据」**（或 `AppUsage.exe --backup`）会打一个 ZIP 到**桌面**：
+
+```
+appusage-备份_2026-10-24_0043.zip
+├── logs/        原始使用记录（一天一个文件）
+├── config.json  配置（**API Key 和 PAT 已被抹掉**）
+└── README.txt   怎么恢复
+```
+
+> 密钥被抹掉是**故意的**：备份这种东西很容易被转发出去，密钥不该跟着走。
+> 恢复后自己在「设置」里重新填就行。
 
 ---
 

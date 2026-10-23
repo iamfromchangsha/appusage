@@ -88,7 +88,11 @@ internal sealed class Store
                     }
                 }
             }
-            catch { /* 日志正在被写，读失败就下一轮再读 */ }
+            catch (Exception ex)
+            {
+                // 别再静默吞掉：读失败要能查到原因（之前这里空 catch，出问题完全没线索）
+                Program.Trace("[store] 读取日志失败: " + ex.Message);
+            }
 
             if (changed) Version++;
 

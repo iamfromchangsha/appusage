@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.Json;
 using AppUsage.Core;
 
@@ -13,6 +13,18 @@ internal static class SelfTest
 {
     private static int _pass;
     private static readonly List<string> _fails = new();
+
+    /// <summary>
+    /// 自测用的**固定日期**。
+    /// 之前用例用「现在减 2 小时」造数据、再拿 <c>DateTime.Today</c> 去断言 ——
+    /// 一过午夜这两小时就落到前一天去了，于是每天 00:00~02:00 整套自测必挂。
+    /// 现在统一用固定日期，跟「现在几点」彻底解耦。
+    /// </summary>
+    private static readonly DateTime TestDay = new(2026, 1, 1);
+
+    /// <summary>固定日期上的某个时刻（Unix 秒）。</summary>
+    private static double TestStamp(double hour) =>
+        new DateTimeOffset(TestDay.AddHours(hour)).ToUnixTimeMilliseconds() / 1000.0;
 
     /// <summary>
     /// 跑一遍全部用例。返回 0 = 全过，1 = 有失败。
@@ -53,6 +65,7 @@ internal static class SelfTest
         TestShotIndexLookup();
         TestAiDecoding();
         TestAiResponseParsing();
+        TestDataBackup();
 
             Console.WriteLine();
             Console.WriteLine($"自测完成：{_pass} 通过，{_fails.Count} 失败");
@@ -237,7 +250,7 @@ internal static class SelfTest
         Directory.CreateDirectory(dir);
         try
         {
-            double baseTs = DateTimeOffset.Now.AddHours(-2).ToUnixTimeMilliseconds() / 1000.0;
+            double baseTs = TestStamp(10);
             // 一天之内：A 用 60 秒 → 离开 10 分钟 → A 再用 60 秒 → B 用 60 秒
             // 合并后是 3 段：A / A / B
             // → 真正的「换应用」只有 1 次（A→B），中间那次是暂停
@@ -256,7 +269,7 @@ internal static class SelfTest
 
             var store = new Store(dir, new Config());
             store.Reload();
-            var report = ReportBuilder.Build(store, new Config(), DateTime.Today, DateTime.Today);
+            var report = ReportBuilder.Build(store, new Config(), TestDay, TestDay);
 
             Eq(3, report.Sessions, "合并后 3 段");
             Eq(1, report.Switches, "真正的应用切换只有 1 次（A→B）");
@@ -274,7 +287,7 @@ internal static class SelfTest
         Console.WriteLine("— 跨零点拆分 —");
 
         // 今天 23:59:40 → 明天 00:00:20
-        var today = DateTime.Today;
+        var today = TestDay;
         var midnight = today.AddDays(1);
         double midnightTs = new DateTimeOffset(midnight).ToUnixTimeMilliseconds() / 1000.0;
         double start = midnightTs - 20;
@@ -310,7 +323,7 @@ internal static class SelfTest
         Directory.CreateDirectory(dir);
         try
         {
-            double t = DateTimeOffset.Now.AddHours(-2).ToUnixTimeMilliseconds() / 1000.0;
+            double t = TestStamp(10);
             File.WriteAllText(Path.Combine(dir, "2026-01-01.log"),
                 string.Join('\n', new[]
                 {
@@ -325,7 +338,7 @@ internal static class SelfTest
             var total = store.Days.Values.Sum(d => d.Total);
             Eq(180, total, "三段共 180 秒");
 
-            var today = DateTime.Today;
+            var today = TestDay;
             var topics = store.TopicsFor(today);
             Check(topics.Count >= 1, "解析出主题");
             var fenbi = topics.FirstOrDefault(t => t.Text == "粉笔课堂");
@@ -352,7 +365,7 @@ internal static class SelfTest
         Directory.CreateDirectory(dir);
         try
         {
-            double t = DateTimeOffset.Now.AddHours(-3).ToUnixTimeMilliseconds() / 1000.0;
+            double t = TestStamp(9);
 
             // 旧文件：一条完整行 + 一条被截断的半行（没有结尾换行）
             var legacy = Path.Combine(dir, "0000-legacy.log");
@@ -393,7 +406,7 @@ internal static class SelfTest
         Directory.CreateDirectory(dir);
         try
         {
-            var t = DateTimeOffset.Now.AddHours(-1).ToUnixTimeMilliseconds() / 1000.0;
+            var t = TestStamp(11);
             File.WriteAllText(Path.Combine(dir, "x.log"),
                 $"code\tC:\\c\\code.exe\tmain.cs\t{t:F3}\t{t + 100:F3}\t100.000\n" +
                 $"chrome\tC:\\b\\chrome.exe\t某网页 - Google Chrome\t{t + 100:F3}\t{t + 200:F3}\t100.000\n");
@@ -401,7 +414,7 @@ internal static class SelfTest
             var config = new Config();
             var store = new Store(dir, config);
             store.Reload();
-            var report = ReportBuilder.Build(store, config, DateTime.Today, DateTime.Today);
+            var report = ReportBuilder.Build(store, config, TestDay, TestDay);
 
             Eq(200, report.TotalSeconds, "总时长 = 各段之和");
             Check(report.Categories.Count >= 2, "分类至少有 2 项");
@@ -552,7 +565,7 @@ internal static class SelfTest
         Directory.CreateDirectory(dir);
         try
         {
-            double t = DateTimeOffset.Now.AddHours(-1).ToUnixTimeMilliseconds() / 1000.0;
+            double t = TestStamp(11);
             File.WriteAllText(Path.Combine(dir, "2026-01-01.log"),
                 $"msedge\tC:\\e\\msedge.exe\t小红书创作服务平台 - Google Chrome\t{t:F3}\t{t + 60:F3}\t60.000\n");
 
@@ -560,7 +573,7 @@ internal static class SelfTest
             var store = new Store(dir, config);
             store.Reload();
 
-            var before = store.SitesFor(DateTime.Today);
+            var before = store.SitesFor(TestDay);
             Check(!before.Any(s => s.Site == "xiaohongshu.com"), "没配词表时认不出（预期内）");
 
             // 用户在设置里加了词条
@@ -568,7 +581,7 @@ internal static class SelfTest
             config.SiteNames["xiaohongshu.com"] = "小红书";
             store.Rebuild();
 
-            var after = store.SitesFor(DateTime.Today);
+            var after = store.SitesFor(TestDay);
             Check(after.Any(s => s.Site == "xiaohongshu.com"), "加了词条并重建后认出来了");
             Check(after.Any(s => s.Name == "小红书"), "显示名也用上了");
             Eq(60, store.Days.Values.Sum(d => d.Total), "重建后总时长不变");
@@ -748,6 +761,53 @@ internal static class SelfTest
         finally
         {
             try { Directory.Delete(dir, true); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// 备份：日志要打进去，**密钥必须抹掉**（备份很容易被转发出去）。
+    /// </summary>
+    private static void TestDataBackup()
+    {
+        Console.WriteLine("— 数据备份 —");
+        var root = Path.Combine(Path.GetTempPath(), "appusage_selftest_" + Guid.NewGuid().ToString("N"));
+        var dataDir = Path.Combine(root, "data");
+        var destDir = Path.Combine(root, "out");
+        Directory.CreateDirectory(Path.Combine(dataDir, "logs"));
+        Directory.CreateDirectory(destDir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dataDir, "logs", "2026-01-01.log"), "app\tC:\\a.exe\t标题\t1.0\t2.0\t1.000\n");
+            File.WriteAllText(Path.Combine(dataDir, "config.json"),
+                "{\"ai\":{\"api_key\":\"sk-super-secret\"},\"shots\":{\"github_token\":\"github_pat_super_secret\"}}");
+
+            var zipPath = DataBackup.Create(dataDir, Path.Combine(dataDir, "config.json"), destDir);
+            Check(File.Exists(zipPath), "备份 ZIP 已生成");
+
+            using var fs = File.OpenRead(zipPath);
+            using var zip = new System.IO.Compression.ZipArchive(fs, System.IO.Compression.ZipArchiveMode.Read);
+            var names = zip.Entries.Select(e => e.FullName).ToList();
+            Check(names.Contains("logs/2026-01-01.log"), "日志打进去了", string.Join(",", names));
+            Check(names.Contains("config.json"), "配置也打进去了");
+            Check(names.Any(n => n.EndsWith("README.txt", StringComparison.OrdinalIgnoreCase)), "带了一份说明");
+
+            string ReadEntry(string n)
+            {
+                var e = zip.GetEntry(n);
+                if (e is null) return string.Empty;
+                using var r = new StreamReader(e.Open());
+                return r.ReadToEnd();
+            }
+
+            var cfgText = ReadEntry("config.json");
+            Check(!cfgText.Contains("sk-super-secret"), "配置里的 API Key 被抹掉了");
+            Check(!cfgText.Contains("github_pat_super_secret"), "配置里的 PAT 被抹掉了");
+            Check(cfgText.Contains("\"ai\""), "抹掉密钥后配置结构还在");
+            Check(ReadEntry("logs/2026-01-01.log").Contains("标题"), "日志内容完整");
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { }
         }
     }
 
