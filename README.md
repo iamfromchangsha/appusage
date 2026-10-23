@@ -116,6 +116,34 @@
 > 凭据建议用 **fine-grained PAT**（只授权那一个私有仓库的 Contents 读写），
 > 比 classic PAT 的 `repo` scope 权限小得多。
 
+### GitHub PAT 怎么拿
+
+1. 打开 <https://github.com/settings/personal-access-tokens/new>（或
+   Settings → Developer settings → Personal access tokens → **Fine-grained tokens** → Generate new token）
+2. **Token name** 填 `AppUsage`，Expiration 选最长（1 年）
+3. **Resource owner**：选你的账号（`iamfromchangsha`）
+4. **Repository access**：选 **Only select repositories** → 勾选 `appusage-shots`
+   （私有仓已建好；若还没建，先选 Public repositories 生成也行）
+5. **Repository permissions → Contents → Read and write**（**只开这一项**，别的都不用）
+6. Generate token → **立刻复制** `github_pat_...`（只显示一次）
+
+然后在程序里：**日报页 ⚙ → GitHub 段**
+
+| 字段 | 填什么 |
+|---|---|
+| Token | 刚复制的 `github_pat_...` |
+| 拥有者 | `iamfromchangsha`（已预填） |
+| 仓库名 | `appusage-shots`（已预填，私有仓已建好） |
+| 仓库不存在时自动创建 | 勾上（万一删了仓库会自动重建） |
+
+点「**测试 / 创建仓库**」→ 出现绿色的「✓ 仓库 iamfromchangsha/appusage-shots 可用」就成了，
+再点「保存」。
+
+> **Token 存在哪**：`config.json`（本机明文）。这个文件**已加入 .gitignore 且不再被 git 跟踪**，
+> 所以不会被提交到仓库；仓库里只有不含密钥的 `config.example.json` 模板。
+> 随时可以去 GitHub 设置里吊销，程序会提示 token 无效并暂停上传。
+
+
 ---
 
 ## 资源占用（2026-10-23 实测，本机 150% 缩放）
