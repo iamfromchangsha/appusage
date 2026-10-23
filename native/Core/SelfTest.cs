@@ -35,6 +35,7 @@ internal static class SelfTest
         TestSiteFromStrippedSuffix();
         TestSiteHintsCodec();
         TestAppSorting();
+        TestSlantButtonState();
         TestSiteHintsRebuild();
             TestDocumentTitle();
             TestTokenExtract();
@@ -664,6 +665,34 @@ internal static class SelfTest
         Eq("Alpha", byName[0].Name, "名字升序第一位");
         Eq("Gamma", byName[2].Name, "名字升序最后一位");
         Eq("Gamma", AppSorter.Sort(apps, "name", true)[0].Name, "名字降序第一位");
+    }
+
+    /// <summary>
+    /// 回归：自绘斜切按钮的选中态**只能由外部设置**。
+    /// 以前它在 MouseDown 里自己取反，「刷新」那种没人管 Selected 的按钮
+    /// 点一下就永远保持高亮，看着像被选中了。
+    /// </summary>
+    private static void TestSlantButtonState()
+    {
+        Console.WriteLine("— 自绘按钮状态 —");
+        using var b = new SlantButton();
+        b.Selected = false;
+
+        var onMouseDown = typeof(System.Windows.Forms.Control).GetMethod(
+            "OnMouseDown",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        Check(onMouseDown is not null, "能拿到 Control.OnMouseDown");
+
+        if (onMouseDown is not null)
+        {
+            var args = new System.Windows.Forms.MouseEventArgs(
+                System.Windows.Forms.MouseButtons.Left, 1, 0, 0, 0);
+            onMouseDown.Invoke(b, new object[] { args });
+        }
+        Check(!b.Selected, "按下鼠标不会自己改选中态");
+
+        b.Selected = true;
+        Check(b.Selected, "选中态由外部设置才生效");
     }
 
     /// <summary>

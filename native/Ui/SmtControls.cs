@@ -48,7 +48,10 @@ internal sealed class SlantButton : Control
 
     protected override void OnMouseDown(MouseEventArgs e)
     {
-        if (e.Button == MouseButtons.Left) { _selected = !_selected; Invalidate(); }
+        // 注意：这里**不要**自己切换 _selected。
+        // 选中态是外部通过 Selected 属性设的（时间范围 / 色阶那两组由 StyleSeg 统一管）。
+        // 以前这里按下就取反，结果「刷新」这种没人管 Selected 的按钮点一下就永远保持
+        // 高亮，看起来像被选中了；按下后拖走（没触发 Click）也会把状态弄乱。
         base.OnMouseDown(e);
     }
 
