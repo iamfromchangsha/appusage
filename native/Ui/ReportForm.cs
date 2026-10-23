@@ -80,6 +80,14 @@ internal sealed class ReportForm : Form
             var sb = _aiSettings.PointToScreen(new Point(_aiSettings.Width / 2, _aiSettings.Height / 2));
             Program.Trace($"report shown ai button screen = {ab.X},{ab.Y} " +
                           $"settings screen = {sb.X},{sb.Y} hwnd = {Handle}");
+
+            // 顶栏那几个自绘按钮（自绘控件 UIA 没有 Invoke 模式，只能靠坐标）
+            foreach (var (name, b) in new (string, MiniButton)[]
+                     { ("prev", _prev), ("next", _next), ("today", _today), ("copy", _copy) })
+            {
+                var p = b.PointToScreen(new Point(b.Width / 2, b.Height / 2));
+                Program.Trace($"report nav button[{name}] screen = {p.X},{p.Y}");
+            }
         }
         catch { /* ignore */ }
     }

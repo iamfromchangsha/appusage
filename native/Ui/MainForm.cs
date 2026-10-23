@@ -20,6 +20,7 @@ internal sealed class MainForm : Form
     private readonly Label _heatSub = new();
     private readonly Label _recentSub = new();
     private Card _tableCard = null!;
+    private SlimScrollBar? _slimScroll;
     private readonly TextBox _search = new();
     private readonly SlantButton _refresh = new();
     private readonly SlantButton[] _rangeButtons = new SlantButton[3];
@@ -359,6 +360,53 @@ internal sealed class MainForm : Form
         return card;
     }
 
+    /// <summary>
+    /// 深色皮肤下给表格配一条自绘的细滚动条盖住系统那条白条。
+    /// 浅色皮肤不盖——系统那条在浅底上本来就协调。
+    /// </summary>
+    private void SetupSlimScroll(Card card)
+    {
+        if (_slimScroll is not null) return;
+        // DataGridView 的内部滚动条是在句柄创建后才有的，构造期找不到
+        var native = _grid.Controls.OfType<ScrollBar>().FirstOrDefault(b => b is VScrollBar);
+        if (native is null) return;
+
+        _slimScroll = new SlimScrollBar(_grid, native);
+        card.Content.Controls.Add(_slimScroll);
+        _slimScroll.BringToFront();
+
+        _grid.Scroll += (_, _) => LayoutSlimScroll();
+        card.Content.Resize += (_, _) => LayoutSlimScroll();
+        LayoutSlimScroll();
+    }
+
+    private void LayoutSlimScroll()
+    {
+        if (_slimScroll is null) return;
+        var native = _slimScroll.Native;
+        // 注意：**不能**用 native.Visible 来判断要不要显示 ——
+        // DataGridView 自己管这个滚动条，它报出来的 Visible 不可靠（明明在显示却说 false）。
+        // 所以深色皮肤下常驻覆盖，由覆盖层自己判断「需不需要滚动」再决定画不画。
+        _slimScroll.Visible = Theme.IsDark;
+        if (!_slimScroll.Visible) return;
+
+        int w = Math.Max(native.Width, Dpi.Px(20));
+        // 用 PointToScreen 精确换算网格在父容器里的位置 ——
+        // 直接拿 Bounds 加减容易差几个像素（父容器还有 Padding），盖不住就白盖了
+        var gridOrigin = _grid.PointToScreen(Point.Empty);
+        var parentOrigin = _slimScroll.Parent!.PointToScreen(Point.Empty);
+        int dx = gridOrigin.X - parentOrigin.X;
+        int dy = gridOrigin.Y - parentOrigin.Y;
+
+        _slimScroll.Bounds = new Rectangle(
+            dx + _grid.Width - w,
+            dy,
+            w,
+            _grid.Height);
+        _slimScroll.BringToFront();
+        _slimScroll.Invalidate();
+    }
+
     private void ConfigureGrid()
     {
         _grid.Dock = DockStyle.Fill;
@@ -461,6 +509,22 @@ internal sealed class MainForm : Form
         _grid.DefaultCellStyle.SelectionForeColor = dark ? ColorTranslator.FromHtml("#05060F") : Theme.Text;
         _grid.AlternatingRowsDefaultCellStyle.BackColor = dark ? ColorTranslator.FromHtml("#0C1230") : Theme.Panel2;
         _grid.AlternatingRowsDefaultCellStyle.ForeColor = Theme.TextDim;
+
+        // 深色皮肤下 DataGridView 的系统滚动条是**浅色**的，在深蓝底上特别刺眼。
+        // .NET 9 的 WinForms 已经去掉了 ScrollBar.TrackColor / ThumbColor
+        //（那是 .NET Framework 才有的），只能退而试试 BackColor 能不能压住轨道。
+        try
+        {
+            foreach (Control c in _grid.Controls)
+            {
+                if (c is ScrollBar sb)
+                {
+                    sb.BackColor = dark ? Theme.Panel2 : Theme.Panel;
+                    sb.ForeColor = dark ? Theme.TextDim : Theme.Text;
+                }
+            }
+        }
+        catch { /* 拿不到就算了 */ }
         _grid.AlternatingRowsDefaultCellStyle.SelectionBackColor = dark ? Theme.Accent : Theme.Panel3;
         _grid.AlternatingRowsDefaultCellStyle.SelectionForeColor = dark ? ColorTranslator.FromHtml("#05060F") : Theme.Text;
         _grid.RowsDefaultCellStyle.SelectionBackColor = dark ? Theme.Accent : Theme.Panel3;
@@ -578,6 +642,9 @@ internal sealed class MainForm : Form
         list = AppSorter.Sort(list, _sortKey, _sortDesc);
 
         _grid.SuspendLayout();
+        // 重建行会把滚动位置重置到顶部 —— 数据每 20 秒更新一次，
+        // 不保留的话用户正往下翻，表就自己跳回第一行了
+        int keepScroll = _grid.FirstDisplayedScrollingRowIndex;
         _grid.Rows.Clear();
         foreach (var a in list)
         {
@@ -592,6 +659,9 @@ internal sealed class MainForm : Form
         }
         _grid.ResumeLayout();
         ClearGridSelection();
+        try { _grid.FirstDisplayedScrollingRowIndex = Math.Min(keepScroll, Math.Max(0, list.Count - 1)); }
+        catch { /* 行数变了导致越界，忽略 */ }
+        LayoutSlimScroll();   // 行数变了，滑块比例和可见性都要跟着变
 
         _tableCard.SubLabel.Text = $"{_store.Apps.Count} 个应用 · 累计 {_store.TotalSeconds / 3600:0.#} 小时";
         _tableCard.SubLabel.Invalidate();
@@ -636,6 +706,7 @@ internal sealed class MainForm : Form
         _search.ForeColor = Theme.Text;
 
         ApplyGridTheme();
+        LayoutSlimScroll();   // 自绘滚动条只在深色皮肤下显示
         ApplyThemeToTree(this);
 
         foreach (var b in _rangeButtons) b.Invalidate();
@@ -802,6 +873,9 @@ internal sealed class MainForm : Form
     {
         base.OnShown(e);
         ClearGridSelection();
+        // 表格的内部滚动条要等 DataGridView 有了句柄才会创建，
+        // 所以自绘滚动条只能在这里（窗口显示之后）才建得出来
+        SetupSlimScroll(_tableCard);
         using (var g = Graphics.FromHwnd(Handle))
         {
             Program.Trace($"shown dpi={DeviceDpi} scale={Dpi.Scale:F2} gDpi={g.DpiX} " +

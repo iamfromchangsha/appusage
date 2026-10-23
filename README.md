@@ -386,6 +386,7 @@ native/
 │  ├─ SettingsForm.cs       设置页
 │  ├─ SiteHintsForm.cs      站点关键词编辑器
 │  ├─ HeatmapControl.cs     自绘热力图
+│  ├─ SlimScrollBar.cs      深色皮肤下自绘的细滚动条（系统那条是白条）
 │  ├─ ReportWidgets.cs      构成条 / 主题列表 / 站点列表
 │  ├─ Widgets.cs            统计卡 / 排行 / 时间线 / 趋势条
 │  ├─ ShotGrid.cs           截图缩略图网格
