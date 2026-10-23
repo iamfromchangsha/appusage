@@ -7,6 +7,7 @@ internal sealed class MainForm : Form
 {
     private readonly Store _store;
     private readonly Tracker _tracker;
+    private readonly Config _config;
 
     private readonly HeaderBar _header = new();
     private readonly StatCard[] _cards = new StatCard[5];
@@ -26,9 +27,10 @@ internal sealed class MainForm : Form
     private readonly TrayIcon _tray;
     private readonly TrayIcon? _sharedTray;
     private readonly string _dataDir;
+    private readonly AppPaths _paths;
     private TableLayoutPanel? _root;
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 3000 };
-    private readonly DayDetailForm _detail;
+    private ReportForm? _reportForm;
     private int _lastVersion = -1;
 
     private int _weeks = 53;
@@ -37,11 +39,13 @@ internal sealed class MainForm : Form
     private bool _sortDesc = true;
     private bool _reallyExit;
 
-    public MainForm(Store store, Tracker tracker, Config config, string dataDir, TrayIcon? sharedTray = null)
+    public MainForm(Store store, Tracker tracker, Config config, AppPaths paths, TrayIcon? sharedTray = null)
     {
         _store = store;
         _tracker = tracker;
-        _dataDir = dataDir;
+        _config = config;
+        _paths = paths;
+        _dataDir = paths.DataDir;
         _sharedTray = sharedTray;
 
         Text = "应用使用时长";
@@ -65,14 +69,13 @@ internal sealed class MainForm : Form
         Location = new Point(work.X + Math.Max(0, (work.Width - w) / 2),
                               work.Y + Math.Max(0, (work.Height - h) / 2));
 
-        _detail = new DayDetailForm(store);
-
         BuildUi();
 
         _header.ThemeToggle.Pressed += () => SetTheme(!Theme.IsDark);
+        _header.ReportButton.Pressed += () => OpenReport(DateTime.Today);
 
         // 按上次的偏好上色（控件已在默认深色下建好，这里统一重刷一遍）
-        SetTheme(UiPrefs.Load(dataDir).DarkTheme);
+        SetTheme(UiPrefs.Load(paths.DataDir).DarkTheme);
 
         _tray = BuildTray();
 
@@ -602,7 +605,7 @@ internal sealed class MainForm : Form
         foreach (var b in _paletteButtons) b.Invalidate();
         _refresh.Invalidate();
 
-        _detail.ApplyTheme();
+        _reportForm?.ApplyTheme();
         Theme.ApplyTitleBar(this, dark);
         Invalidate(true);
 
@@ -646,11 +649,19 @@ internal sealed class MainForm : Form
     private void OnCellClicked(DateTime day)
     {
         Program.Trace($"cell clicked {day:yyyy-MM-dd}");
-        _detail.ShowDay(day);
-        var x = Math.Max(0, Right - _detail.Width - P(8));
-        _detail.Location = new Point(x, Top + P(60));
-        _detail.Show();
-        _detail.BringToFront();
+        OpenReport(day);
+    }
+
+    /// <summary>打开日报页（点热力图格子或顶栏按钮都会走到这里）。</summary>
+    private void OpenReport(DateTime day)
+    {
+        if (_reportForm is null || _reportForm.IsDisposed)
+        {
+            _reportForm = new ReportForm(_store, _config, _paths, _tracker);
+        }
+        _reportForm.ShowReport(day);
+        _reportForm.Show();
+        _reportForm.BringToFront();
     }
 
     private static string Fmt(double seconds)
@@ -773,6 +784,8 @@ internal sealed class MainForm : Form
         Program.Trace($"theme toggle screen = {tp.X},{tp.Y} hwnd = {_header.ThemeToggle.Handle}");
         Program.Trace($"heatmap bounds = {_heatmap.Bounds} cell = {_heatmap.CellSize}px " +
                       $"gridHeight = {Dpi.Px(18) + 7 * (_heatmap.CellSize + Dpi.Px(3))}");
+        var rb = _header.ReportButton.PointToScreen(new Point(_header.ReportButton.Width / 2, _header.ReportButton.Height / 2));
+        Program.Trace($"report button screen = {rb.X},{rb.Y} hwnd = {_header.ReportButton.Handle}");
     }
 
     protected override void SetVisibleCore(bool value)

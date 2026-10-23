@@ -9,7 +9,30 @@ internal sealed class DayBucket
     public int AppCount;
     public readonly Dictionary<string, double> Apps = new();
     public readonly Dictionary<int, double> Hours = new();
+
+    /// <summary>清洗后的标题 → 聚合（同一标题重复出现只累加时长）。</summary>
+    public readonly Dictionary<string, TopicAgg> Topics = new();
+
+    /// <summary>站点域名 → 时长。</summary>
+    public readonly Dictionary<string, double> Sites = new();
+
+    /// <summary>当天的原始使用段（用于算切换次数 / 最长连续）。</summary>
+    public readonly List<Seg> Segs = new();
 }
+
+/// <summary>一个标题（网页 / 文档 / 应用窗口）的聚合。</summary>
+internal sealed class TopicAgg
+{
+    public string Text = string.Empty;
+    public TopicKind Kind = TopicKind.Unknown;
+    public string Site = string.Empty;
+    public string SiteName = string.Empty;
+    public double Seconds;
+    public int Count;
+}
+
+/// <summary>一段连续使用。</summary>
+internal readonly record struct Seg(string AppKey, double Start, double Duration);
 
 /// <summary>单个应用的累计统计。</summary>
 internal sealed class AppAggregate

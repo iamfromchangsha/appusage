@@ -3,7 +3,6 @@
   "idle_seconds": 90,
   "min_span_seconds": 2.0,
   "flush_interval": 20.0,
-  "db_path": "data/usage.db",
   "excluded_exes": [],
   "app_names": {
     "chrome": "Chrome",
@@ -11,6 +10,7 @@
     "code": "VS Code",
     "wechat": "微信",
     "weixin": "微信",
+    "wechatapp": "微信",
     "qq": "QQ",
     "steam": "Steam",
     "explorer": "文件资源管理器",
@@ -18,6 +18,36 @@
     "zhihu": "知乎",
     "dingtalk": "钉钉",
     "neteasemusic": "网易云音乐",
-    "qqmusic": "QQ音乐"
+    "qqmusic": "QQ音乐",
+    "minimaxcode": "MiniMax Code",
+    "claudebiu": "Claude Biu"
+  },
+
+  "app_categories": {},
+  "site_hints": {},
+  "site_names": {},
+
+  "ai": {
+    "enabled": false,
+    "base_url": "https://api.deepseek.com",
+    "api_key": "",
+    "model": "deepseek-v4-pro",
+    "thinking": true,
+    "include_topics": true,
+    "timeout_seconds": 45
+  },
+
+  "shots": {
+    "enabled": false,
+    "interval_minutes": 20,
+    "max_per_day": 8,
+    "github_token": "",
+    "github_owner": "",
+    "github_repo": "appusage-shots",
+    "auto_create_repo": true,
+    "excluded": ["wechat", "weixin", "wechatapp", "qq"],
+    "full_width": 1280,
+    "thumb_width": 320,
+    "jpeg_quality": 60
   }
 }

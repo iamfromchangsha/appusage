@@ -98,6 +98,7 @@ internal sealed class HeaderBar : Panel
     public Label Status = new();
     public Label Today = new();
     public MiniButton ThemeToggle = new();
+    public MiniButton ReportButton = new();
 
     public HeaderBar()
     {
@@ -138,7 +139,12 @@ internal sealed class HeaderBar : Panel
         ThemeToggle.Font = new Font("Segoe UI", 8.4f);
         ThemeToggle.Size = new Size(Dpi.Px(70), Dpi.Px(26));
 
-        Controls.AddRange(new Control[] { Title, Subtitle, Status, Today, ThemeToggle });
+        ReportButton.Text = "📋 日报";
+        ReportButton.ForeColor = Theme.Accent2;
+        ReportButton.Font = new Font("Segoe UI", 8.4f);
+        ReportButton.Size = new Size(Dpi.Px(80), Dpi.Px(26));
+
+        Controls.AddRange(new Control[] { Title, Subtitle, Status, Today, ReportButton, ThemeToggle });
     }
 
     protected override void OnResize(EventArgs e)
@@ -150,10 +156,11 @@ internal sealed class HeaderBar : Panel
     private void LayoutChildren()
     {
         int x = Dpi.Px(Theme.Angular ? 62 : 58);
-        Title.SetBounds(x, Dpi.Px(6), Dpi.Px(360), Dpi.Px(26));
-        Subtitle.SetBounds(x, Dpi.Px(33), Dpi.Px(380), Dpi.Px(17));
+        Title.SetBounds(x, Dpi.Px(6), Dpi.Px(360), Dpi.Px(30));
+        Subtitle.SetBounds(x, Dpi.Px(36), Dpi.Px(380), Dpi.Px(18));
         Status.SetBounds(Width - Dpi.Px(452), Dpi.Px(14), Dpi.Px(170), Dpi.Px(24));
         Today.SetBounds(Width - Dpi.Px(272), Dpi.Px(11), Dpi.Px(170), Dpi.Px(28));
+        ReportButton.SetBounds(Width - Dpi.Px(182), Dpi.Px(12), Dpi.Px(80), Dpi.Px(26));
         ThemeToggle.SetBounds(Width - Dpi.Px(92), Dpi.Px(12), Dpi.Px(70), Dpi.Px(26));
     }
 

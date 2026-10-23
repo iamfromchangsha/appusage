@@ -14,6 +14,7 @@ internal sealed class Store
 {
     private readonly string _logPath;
     private readonly Config _config;
+    private readonly TopicParser _topics;
     private readonly object _sync = new();
     private readonly List<byte> _pending = new();
     private long _offset;
@@ -25,6 +26,7 @@ internal sealed class Store
     {
         _logPath = logPath;
         _config = config;
+        _topics = new TopicParser(config);
     }
 
     public double TotalSeconds { get; private set; }
@@ -84,6 +86,7 @@ internal sealed class Store
         var key = parts[0];
         if (key.Length == 0) return;
         var exe = parts[1];
+        var title = parts.Length > 2 ? parts[2] : string.Empty;
 
         var local = DateTimeOffset.FromUnixTimeMilliseconds((long)(start * 1000)).LocalDateTime;
         var day = local.Date;
@@ -97,6 +100,32 @@ internal sealed class Store
         bucket.Total += duration;
         bucket.Apps[key] = bucket.Apps.GetValueOrDefault(key) + duration;
         bucket.Hours[hour] = bucket.Hours.GetValueOrDefault(hour) + duration;
+        bucket.Segs.Add(new Seg(key, start, duration));
+
+        // 标题 → 主题 / 站点（标题解析有缓存，同一标题只算一次）
+        if (title.Length > 0)
+        {
+            var info = _topics.Parse(title);
+            if (info.Text.Length > 0)
+            {
+                if (!bucket.Topics.TryGetValue(info.Text, out var agg))
+                {
+                    agg = new TopicAgg
+                    {
+                        Text = info.Text,
+                        Kind = info.Kind,
+                        Site = info.Site,
+                        SiteName = info.SiteName,
+                    };
+                    bucket.Topics[info.Text] = agg;
+                }
+                agg.Seconds += duration;
+                agg.Count++;
+
+                if (info.Site.Length > 0)
+                    bucket.Sites[info.Site] = bucket.Sites.GetValueOrDefault(info.Site) + duration;
+            }
+        }
 
         if (!Apps.TryGetValue(key, out var app))
         {
@@ -226,6 +255,39 @@ internal sealed class Store
 
     public List<AppAggregate> AppTable() =>
         Apps.Values.OrderByDescending(a => a.Total).ToList();
+
+    // ---------------- 日报相关查询 ----------------
+
+    /// <summary>某天的使用段序列（按时间升序）。</summary>
+    public List<Seg> SegmentsFor(DateTime day)
+    {
+        if (!Days.TryGetValue(day, out var b)) return new List<Seg>();
+        var list = b.Segs.ToList();
+        list.Sort((x, y) => x.Start.CompareTo(y.Start));
+        return list;
+    }
+
+    /// <summary>某天的主题聚合（按时长降序）。</summary>
+    public List<TopicAgg> TopicsFor(DateTime day)
+    {
+        if (!Days.TryGetValue(day, out var b)) return new List<TopicAgg>();
+        return b.Topics.Values.OrderByDescending(t => t.Seconds).ToList();
+    }
+
+    /// <summary>某天的站点聚合（按时长降序）。</summary>
+    public List<(string Site, string Name, double Seconds)> SitesFor(DateTime day)
+    {
+        if (!Days.TryGetValue(day, out var b)) return new List<(string, string, double)>();
+        return b.Sites
+            .Select(kv => (kv.Key, SiteDisplayName(kv.Key), kv.Value))
+            .OrderByDescending(x => x.Item3)
+            .ToList();
+    }
+
+    public string SiteDisplayName(string site) =>
+        _config.SiteNames.TryGetValue(site, out var n) ? n
+        : CategoryMap.DefaultSiteNames.TryGetValue(site, out var d) ? d
+        : site;
 
     /// <summary>由应用名散列出一个稳定颜色（SMT 风格的电光色系）。</summary>
     /// <summary>应用色标盘（随皮肤切换）。</summary>

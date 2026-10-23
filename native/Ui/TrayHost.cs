@@ -79,15 +79,17 @@ internal sealed class TrayHost
     private readonly Tracker _tracker;
     private readonly Config _config;
     private readonly string _dataDir;
+    private readonly AppPaths _paths;
     private readonly TrayIcon _tray;
     private MainForm? _form;
 
-    public TrayHost(Store store, Tracker tracker, Config config, string dataDir)
+    public TrayHost(Store store, Tracker tracker, Config config, AppPaths paths)
     {
         _store = store;
         _tracker = tracker;
         _config = config;
-        _dataDir = dataDir;
+        _paths = paths;
+        _dataDir = paths.DataDir;
 
         _tray = new TrayIcon(
             () => $"应用使用时长 · 今日 {Fmt(_store.TotalForDay(DateTime.Today))}",
@@ -101,7 +103,7 @@ internal sealed class TrayHost
     {
         try
         {
-            _form ??= new MainForm(_store, _tracker, _config, _dataDir, _tray);
+            _form ??= new MainForm(_store, _tracker, _config, _paths, _tray);
             _form.ShowMain();
         }
         catch (Exception ex)
