@@ -34,6 +34,7 @@ internal static class SelfTest
             TestSiteDetection();
         TestSiteFromStrippedSuffix();
         TestSiteHintsCodec();
+        TestAppSorting();
         TestSiteHintsRebuild();
             TestDocumentTitle();
             TestTokenExtract();
@@ -637,6 +638,32 @@ internal static class SelfTest
         using (var g = System.Drawing.Graphics.FromImage(nearBlack))
             g.Clear(System.Drawing.Color.FromArgb(3, 3, 3));
         Check(Screenshotter.IsBlank(nearBlack), "几乎全黑（亮度 3）→ 判为黑图");
+    }
+
+    /// <summary>应用明细表的排序（点列头会切换键和方向）。</summary>
+    private static void TestAppSorting()
+    {
+        Console.WriteLine("— 应用明细排序 —");
+        var apps = new List<AppAggregate>
+        {
+            new() { Key = "a", Name = "Beta",  Total = 100, Today = 5, Week = 50, Month = 80, LastSeen = 3 },
+            new() { Key = "b", Name = "Alpha", Total = 300, Today = 1, Week = 10, Month = 20, LastSeen = 9 },
+            new() { Key = "c", Name = "Gamma", Total = 200, Today = 9, Week = 90, Month = 40, LastSeen = 6 },
+        };
+
+        Eq("b", AppSorter.Sort(apps, "total", true)[0].Key, "累计降序：300 分的排第一");
+        Eq("a", AppSorter.Sort(apps, "total", true)[2].Key, "累计降序最后一名是 100 的");
+        Eq("a", AppSorter.Sort(apps, "total", false)[0].Key, "累计升序：100 分的排第一");
+        Eq("c", AppSorter.Sort(apps, "today", true)[0].Key, "今日降序：9 分的排第一");
+        Eq("c", AppSorter.Sort(apps, "d7", true)[0].Key, "近 7 天降序");
+        Eq("a", AppSorter.Sort(apps, "d30", true)[0].Key, "近 30 天降序");
+        Eq("b", AppSorter.Sort(apps, "last", true)[0].Key, "最近使用降序");
+
+        // 名字列：升序是 A→Z
+        var byName = AppSorter.Sort(apps, "name", false);
+        Eq("Alpha", byName[0].Name, "名字升序第一位");
+        Eq("Gamma", byName[2].Name, "名字升序最后一位");
+        Eq("Gamma", AppSorter.Sort(apps, "name", true)[0].Name, "名字降序第一位");
     }
 
     /// <summary>

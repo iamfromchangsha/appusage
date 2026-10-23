@@ -404,7 +404,46 @@ internal sealed class MainForm : Form
         AddCol("total", "累计", 80);
         AddCol("last", "最近使用", 90);
 
+        // 点列头排序。列头长得像能点，就让它真能点——
+        // 之前 SortMode 全是 NotSortable 又没挂 ColumnHeaderMouseClick，
+        // 结果 _sortKey 从头到尾没人改，下面的排序分支全是死代码。
+        _grid.ColumnHeaderMouseClick += OnColumnHeaderClick;
+        UpdateHeaderSortMarks();
+
         ApplyGridTheme();
+    }
+
+    /// <summary>点列头：换列就换排序键，同一列再点一次就换方向。</summary>
+    private void OnColumnHeaderClick(object? sender, DataGridViewCellMouseEventArgs e)
+    {
+        if (e.ColumnIndex < 0 || e.ColumnIndex >= _grid.Columns.Count) return;
+        var col = _grid.Columns[e.ColumnIndex];
+        var key = col.Name == "app" ? "name" : col.Name;
+
+        if (_sortKey == key)
+        {
+            _sortDesc = !_sortDesc;      // 同一列 → 换个方向
+        }
+        else
+        {
+            _sortKey = key;
+            // 换到新列：数字列默认从大到小，名字列默认从 A 到 Z
+            _sortDesc = key != "name";
+        }
+
+        UpdateHeaderSortMarks();
+        FillGrid();
+    }
+
+    /// <summary>在当前排序列的表头上标出方向（▲ 升 / ▼ 降）。</summary>
+    private void UpdateHeaderSortMarks()
+    {
+        foreach (DataGridViewColumn col in _grid.Columns)
+        {
+            var key = col.Name == "app" ? "name" : col.Name;
+            var baseText = col.HeaderText.Replace(" ▲", "").Replace(" ▼", "");
+            col.HeaderText = key == _sortKey ? baseText + (_sortDesc ? " ▼" : " ▲") : baseText;
+        }
     }
 
     /// <summary>按当前皮肤重刷表格配色。</summary>
@@ -536,16 +575,7 @@ internal sealed class MainForm : Form
         if (q.Length > 0)
             list = list.Where(a => a.Name.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
 
-        list = _sortKey switch
-        {
-            "name" => list.OrderBy(a => a.Name, StringComparer.CurrentCulture).ToList(),
-            "today" => list.OrderByDescending(a => a.Today).ToList(),
-            "d7" => list.OrderByDescending(a => a.Week).ToList(),
-            "d30" => list.OrderByDescending(a => a.Month).ToList(),
-            "last" => list.OrderByDescending(a => a.LastSeen).ToList(),
-            _ => list.OrderByDescending(a => a.Total).ToList(),
-        };
-        if (_sortKey == "name" && !_sortDesc) list.Reverse();
+        list = AppSorter.Sort(list, _sortKey, _sortDesc);
 
         _grid.SuspendLayout();
         _grid.Rows.Clear();

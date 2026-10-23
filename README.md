@@ -16,6 +16,7 @@
 | 打开主界面 | 双击 `dist\AppUsage.exe`（已在运行的话，会把**已有实例**的窗口叫出来） |
 | 后台常驻（不占屏幕） | `AppUsage.exe --tray`（开机自启用的就是这个） |
 | 看每日汇报 | 主界面顶栏「📋 日报」按钮，或点热力图任意格子 |
+| 按别的口径看应用 | 主界面「应用明细」表**点列头排序**（再点一次换方向，▲ 升 / ▼ 降） |
 | 控制台菜单 | 双击 `AppUsage.cmd` |
 | 改设置 | 日报页右上角 ⚙（DeepSeek / GitHub 私有仓 / 截图 / 站点关键词） |
 
@@ -308,7 +309,7 @@
 AppUsage.exe              打开主界面
 AppUsage.exe --tray       只在托盘常驻（开机自启用这个）
 AppUsage.exe --data <目录>  指定数据目录
-AppUsage.exe --selftest   跑内置自测（124 个用例），结果同时写到 data\selftest.txt
+AppUsage.exe --selftest   跑内置自测（137 个用例），结果同时写到 data\selftest.txt
 AppUsage.exe --memcheck [天数]  造合成日志量内存占用（默认 30 天，可传 365 看一年）
 AppUsage.exe --test-ai    测 DeepSeek 连接（模型回复会打印出来，用来验证中文没乱码）
 AppUsage.exe --ai-summary [yyyy-MM-dd]  生成某天的 AI 总结并打印（默认今天）
@@ -369,6 +370,7 @@ native/
 │  ├─ CategoryMap.cs        应用分类 + 站点关键词表
 │  ├─ SiteHintsCodec.cs     站点词表的文本编解码（设置页编辑用）
 │  ├─ ReportModel.cs        日报数据模型
+│  ├─ AppSorter.cs          应用明细表的排序
 │  ├─ ReportBuilder.cs      从 Store 装配日报（纯函数、离线）
 │  ├─ SelfTest.cs           内置自测用例（--selftest）
 │  ├─ TokenUtil.cs          凭据提取（按固定长度截取，避免粘串）
