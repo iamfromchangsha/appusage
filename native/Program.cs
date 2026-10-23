@@ -1,4 +1,4 @@
-using AppUsage.Core;
+﻿using AppUsage.Core;
 using AppUsage.Ui;
 
 namespace AppUsage;
@@ -57,8 +57,7 @@ internal static class Program
             }
 
             // 随机截图服务（独立线程，不阻塞追踪）
-            uploader = new ShotUploader(config);
-            shots = new ShotService(config, paths.DataDir, uploader);
+            shots = new ShotService(config, paths.DataDir);
             shots.Start();
 
             // 调试用：--dump <yyyy-MM-dd> 把某天的日报数据导出成文本后退出
@@ -105,7 +104,6 @@ internal static class Program
         finally
         {
             shots?.Dispose();
-            uploader?.Dispose();
             tracker?.Dispose();
         }
         return 0;

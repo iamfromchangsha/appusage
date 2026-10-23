@@ -1,4 +1,4 @@
-using System.Drawing;
+﻿using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 
@@ -15,7 +15,7 @@ internal sealed class ShotService : IDisposable
 
     private readonly Config _config;
     private readonly string _dataDir;
-    private readonly ShotUploader? _uploader;
+    private ShotUploader? _uploader;
     private readonly Thread _thread;
     private volatile bool _running;
     private DateTime _nextDue = DateTime.MinValue;
@@ -27,13 +27,15 @@ internal sealed class ShotService : IDisposable
     /// <summary>当前运行的实例（供 UI 显示状态）。</summary>
     public static ShotService? Current { get; private set; }
 
-    public ShotService(Config config, string dataDir, ShotUploader? uploader)
+    public ShotService(Config config, string dataDir)
     {
         _config = config;
         _dataDir = dataDir;
-        _uploader = uploader;
         _thread = new Thread(Loop) { IsBackground = true, Name = "AppUsage.Shots", Priority = ThreadPriority.BelowNormal };
     }
+
+    /// <summary>上传器懒加载：不开启截图时就不用把 HttpClient / JSON 序列化器拖进内存。</summary>
+    private ShotUploader? Uploader => _uploader ??= _config.Shots.HasGithub ? new ShotUploader(_config) : null;
 
     public void Start() { _running = true; Current = this; _thread.Start(); }
 
@@ -117,7 +119,7 @@ internal sealed class ShotService : IDisposable
 
     private async Task UploadAsync(string relPath, byte[] jpeg, string name, DateTime at)
     {
-        if (_uploader is null || !_uploader.Configured)
+        if (Uploader is null || !Uploader!.Configured)
         {
             // 没配 GitHub：全图留在 outbox，等配好再补传
             SaveOutbox(name, jpeg, at);
@@ -127,7 +129,7 @@ internal sealed class ShotService : IDisposable
 
         try
         {
-            var err = await _uploader.UploadAsync(relPath, jpeg, $"appusage shot {at:yyyy-MM-dd HH:mm:ss}", CancellationToken.None)
+            var err = await Uploader!.UploadAsync(relPath, jpeg, $"appusage shot {at:yyyy-MM-dd HH:mm:ss}", CancellationToken.None)
                                    .ConfigureAwait(false);
             if (err is null)
             {
@@ -154,7 +156,7 @@ internal sealed class ShotService : IDisposable
     /// <summary>把 outbox 里积压的图片补传上去。</summary>
     public void TryFlushOutbox()
     {
-        if (_uploader is null || !_uploader.Configured) return;
+        if (Uploader is null || !Uploader!.Configured) return;
         var dir = OutboxDir;
         if (!Directory.Exists(dir)) return;
 
@@ -165,7 +167,7 @@ internal sealed class ShotService : IDisposable
                 var name = Path.GetFileNameWithoutExtension(f);
                 var at = ParseAt(name);
                 var rel = $"shots/{at:yyyy}/{at:MM}/{at:DD}/{name}.jpg";
-                var err = _uploader.UploadAsync(rel, File.ReadAllBytes(f), $"appusage shot {at:yyyy-MM-dd HH:mm:ss}", CancellationToken.None)
+                var err = Uploader!.UploadAsync(rel, File.ReadAllBytes(f), $"appusage shot {at:yyyy-MM-dd HH:mm:ss}", CancellationToken.None)
                                    .GetAwaiter().GetResult();
                 if (err is null)
                 {
