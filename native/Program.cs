@@ -169,6 +169,15 @@ internal static class Program
             tracker = new Tracker(paths.LogDir, config);
             tracker.Start();
 
+            // --test-shot 调试时会留下**全尺寸**截图，跟「本地不长期留全图」的原则冲突。
+            // 下次正常启动就把它清掉，最多只存在一份临时全图。
+            try
+            {
+                var staleShot = Path.Combine(paths.DataDir, "test-shot.jpg");
+                if (File.Exists(staleShot)) File.Delete(staleShot);
+            }
+            catch { /* ignore */ }
+
             // 随机截图服务（独立线程，不阻塞追踪）
             shots = new ShotService(config, paths.DataDir);
             shots.Start();

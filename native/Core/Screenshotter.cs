@@ -29,6 +29,7 @@ internal static class Screenshotter
 
         using (var g = Graphics.FromImage(bmp))
         {
+            // 第一次：PrintWindow（对普通 Win32 窗口效果好）
             var hdc = g.GetHdc();
             try
             {
@@ -39,15 +40,23 @@ internal static class Screenshotter
 
             if (!got)
             {
-                // 退回屏幕拷贝（要求窗口在屏幕上可见）
+                // 退回屏幕拷贝（要求窗口在屏幕上可见）。
+                // ⚠️ 上面那个 hdc 已经 Release 了，**必须重新取一个**：
+                //    拿已释放的 HDC 去 BitBlt 是未定义行为（句柄可能已被系统复用，
+                //    结果是画到别的设备上或者直接失败）。
                 using (var sg = Graphics.FromHwnd(IntPtr.Zero))
                 {
                     var sdc = sg.GetHdc();
+                    var dst = g.GetHdc();
                     try
                     {
-                        got = NativeMethods.BitBlt(hdc, 0, 0, w, h, sdc, rect.Left, rect.Top, Srccopy);
+                        got = NativeMethods.BitBlt(dst, 0, 0, w, h, sdc, rect.Left, rect.Top, Srccopy);
                     }
-                    finally { sg.ReleaseHdc(sdc); }
+                    finally
+                    {
+                        g.ReleaseHdc(dst);
+                        sg.ReleaseHdc(sdc);
+                    }
                 }
                 if (got) got = !IsBlank(bmp);
             }
@@ -58,7 +67,7 @@ internal static class Screenshotter
         // 缩放到最大宽度
         using var scaled = ScaleTo(bmp, maxWidth);
         using var ms = new MemoryStream();
-        var codec = FindJpegCodec();
+        var codec = JpegCodec.Value;
         if (codec is null)
         {
             scaled.Save(ms, ImageFormat.Jpeg);
@@ -87,8 +96,12 @@ internal static class Screenshotter
         return dst;
     }
 
-    /// <summary>判断画面是否几乎全黑（Chromium 窗口 PrintWindow 常见结果）。</summary>
-    private static bool IsBlank(Bitmap bmp)
+    /// <summary>
+    /// 判断画面是否几乎全黑（Chromium 窗口 PrintWindow 常见结果）。
+    /// 阈值 6/255 很保守：真正的暗画面（视频、终端深色主题）平均亮度远高于它，
+    /// 不会被误判成黑图。
+    /// </summary>
+    internal static bool IsBlank(Bitmap bmp)
     {
         try
         {
@@ -109,10 +122,11 @@ internal static class Screenshotter
         catch { return true; }
     }
 
-    private static ImageCodecInfo? FindJpegCodec()
+    /// <summary>JPEG 编码器缓存起来，别每次抓图都重新枚举一遍编码器。</summary>
+    private static readonly Lazy<ImageCodecInfo?> JpegCodec = new(() =>
     {
         foreach (var c in ImageCodecInfo.GetImageEncoders())
             if (c.FormatID == ImageFormat.Jpeg.Guid) return c;
         return null;
-    }
+    });
 }

@@ -31,6 +31,11 @@ internal sealed class TrayIcon : IDisposable
             {
                 autoItem.Checked = Autostart.Enable();
             }
+            // 自启没生效（比如快捷方式指向的程序被挪走了）要说明白，
+            // 否则用户看到「✓ 开机自启」却发现开机根本没启动
+            var problem = Autostart.Problem();
+            if (problem.Length > 0)
+                MessageBox.Show(problem, "开机自启", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         };
         menu.Items.Add(autoItem);
         menu.Items.Add(new ToolStripSeparator());

@@ -45,6 +45,7 @@ internal static class SelfTest
             TestConfigRoundTrip();
             TestShotPathFormat();
         TestShotNaming();
+        TestBlankDetection();
         TestShotIndexLookup();
         TestAiDecoding();
         TestAiResponseParsing();
@@ -563,6 +564,36 @@ internal static class SelfTest
         Eq(hints.Count, h2.Count, "往返后条数不变");
         Check(h2.TryGetValue("小红书", out var site2) && site2 == "xiaohongshu.com", "往返后内容不变");
         Check(n2.TryGetValue("xiaohongshu.com", out var name2) && name2 == "小红书", "往返后显示名不变");
+    }
+
+    /// <summary>
+    /// 黑图判定：Chromium 窗口 PrintWindow 常常返回纯黑，要能识别出来退回屏幕拷贝。
+    /// 但阈值不能太松——暗色视频、终端深色主题都该被当成有效画面。
+    /// </summary>
+    private static void TestBlankDetection()
+    {
+        Console.WriteLine("— 黑图判定 —");
+
+        using var black = new Bitmap(64, 64, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+        using (var g = System.Drawing.Graphics.FromImage(black))
+            g.Clear(System.Drawing.Color.Black);
+        Check(Screenshotter.IsBlank(black), "纯黑 → 判为黑图");
+
+        using var white = new Bitmap(64, 64, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+        using (var g = System.Drawing.Graphics.FromImage(white))
+            g.Clear(System.Drawing.Color.White);
+        Check(!Screenshotter.IsBlank(white), "纯白 → 不是黑图");
+
+        // 暗但有内容：亮度 30/255，实测真实存档里最暗的一张是 23.5
+        using var dark = new Bitmap(64, 64, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+        using (var g = System.Drawing.Graphics.FromImage(dark))
+            g.Clear(System.Drawing.Color.FromArgb(30, 30, 30));
+        Check(!Screenshotter.IsBlank(dark), "暗色画面（亮度 30）→ 不是黑图，不能误杀");
+
+        using var nearBlack = new Bitmap(64, 64, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+        using (var g = System.Drawing.Graphics.FromImage(nearBlack))
+            g.Clear(System.Drawing.Color.FromArgb(3, 3, 3));
+        Check(Screenshotter.IsBlank(nearBlack), "几乎全黑（亮度 3）→ 判为黑图");
     }
 
     /// <summary>

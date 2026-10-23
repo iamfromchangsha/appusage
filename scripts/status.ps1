@@ -19,8 +19,23 @@ if ($proc) {
 }
 
 $startup = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup'
-if (Test-Path (Join-Path $startup '应用使用时长.lnk')) {
-    Write-Host '[+] 开机自启：已开启' -ForegroundColor Green
+$lnk = Join-Path $startup '应用使用时长.lnk'
+$cmd = Join-Path $startup 'AppUsageTracker.cmd'
+if (Test-Path $lnk) {
+    # 别只看「文件在不在」——快捷方式指向的程序被挪走的话，开机根本拉不起来
+    $target = $null
+    try {
+        $sh = New-Object -ComObject WScript.Shell
+        $target = $sh.CreateShortcut($lnk).TargetPath
+    } catch { }
+    if ($target -and -not (Test-Path $target)) {
+        Write-Host "[!] 开机自启：快捷方式指向的程序不存在 ($target)" -ForegroundColor Red
+        Write-Host '    程序被挪过位置的话，重新开一次自启即可（托盘菜单 → 开机自启）' -ForegroundColor DarkGray
+    } else {
+        Write-Host '[+] 开机自启：已开启' -ForegroundColor Green
+    }
+} elseif (Test-Path $cmd) {
+    Write-Host '[+] 开机自启：已开启（用的是 .cmd 兜底方式）' -ForegroundColor Green
 } else {
     Write-Host '[-] 开机自启：未开启  (运行 scripts\toggle-autostart.ps1 可切换)' -ForegroundColor Yellow
 }
