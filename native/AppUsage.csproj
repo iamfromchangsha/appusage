@@ -10,7 +10,7 @@
     <AssemblyName>AppUsage</AssemblyName>
     <RootNamespace>AppUsage</RootNamespace>
     <ApplicationIcon>app.ico</ApplicationIcon>
-    <Version>1.0.0</Version>
+    <Version>1.2.0</Version>
     <Product>应用使用时长</Product>
     <Description>本机前台应用使用时长追踪与热力图仪表盘</Description>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
