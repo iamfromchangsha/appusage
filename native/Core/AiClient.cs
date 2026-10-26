@@ -255,6 +255,18 @@ internal sealed class AiClient : IDisposable
         sb.AppendLine($"专注度：共 {r.Sessions} 段使用，切换 {r.Switches} 次，最长连续 {Fmt(r.LongestSessionSeconds)}，碎片率 {r.FragmentRate:P0}" +
                     (r.Pauses > 0 ? $"（其中 {r.Pauses} 段是中途离开后又回到同一个应用，不算切换）" : ""));
 
+        // 键鼠统计也一起给（用户选的「一起发」）：
+        // 只发**汇总数字**和最常用的几个键名，不发完整的按键序列。
+        if (r.Input.TotalKeys > 0 || r.Input.Left + r.Input.Right > 0)
+        {
+            var combo = r.Input.Keys.Count(kv => kv.Key.Contains('+'));
+            var top = r.Input.Keys.OrderByDescending(kv => kv.Value).Take(5);
+            sb.AppendLine($"输入活动：按键 {r.Input.TotalKeys} 次（其中组合键 {combo} 次），" +
+                          $"最常用的是 {string.Join("、", top.Select(kv => $"{kv.Key} {kv.Value} 次"))}；" +
+                          $"鼠标移动 {r.Input.DistanceCm / 100:F1} 米，点击 {r.Input.Left + r.Input.Middle + r.Input.Right + r.Input.Side} 次" +
+                          $"（左 {r.Input.Left} / 右 {r.Input.Right} / 中 {r.Input.Middle}）");
+        }
+
         if (_config.Ai.IncludeTopics && r.Topics.Count > 0)
         {
             sb.AppendLine("当天出现过的页面/文档标题（最多 8 条）：");

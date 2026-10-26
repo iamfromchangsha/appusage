@@ -36,6 +36,7 @@ internal sealed class ReportForm : Form
     private readonly SiteList _siteList = new();
     private readonly TimelineControl _timeline = new();
     private readonly ShotGrid _shotGrid = new();
+    private readonly InputStatsView _inputView = new();
     private Card _shotsCard = null!;
 
     public ReportForm(Store store, Config config, AppPaths paths, Tracker? tracker = null)
@@ -57,7 +58,7 @@ internal sealed class ReportForm : Form
         _ = Handle;
         var work = Screen.FromControl(this).WorkingArea;
         int w = Math.Min(Dpi.Px(1000), work.Width - Dpi.Px(16));
-        int h = Math.Min(Dpi.Px(920), work.Height - Dpi.Px(16));
+        int h = Math.Min(Dpi.Px(1040), work.Height - Dpi.Px(16));   // 多了一行「键盘与鼠标」
         ClientSize = new Size(w, h);
         MinimumSize = new Size(Dpi.Px(760), Dpi.Px(560));
 
@@ -120,12 +121,13 @@ internal sealed class ReportForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 7,
+            RowCount = 8,
             BackColor = Theme.Bg,
         };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(46)));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(92)));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(122)));   // AI 总结：3~5 句要放得下
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(122)));   // AI 总结
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(144)));   // 键盘与鼠标
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(98)));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(150)));
@@ -134,10 +136,11 @@ internal sealed class ReportForm : Form
         root.Controls.Add(BuildHeader(), 0, 0);
         root.Controls.Add(BuildStats(), 0, 1);
         root.Controls.Add(BuildAiCard(), 0, 2);
-        root.Controls.Add(BuildCategoryCard(), 0, 3);
-        root.Controls.Add(BuildTopicsCard(), 0, 4);
-        root.Controls.Add(BuildFocusCard(), 0, 5);
-        root.Controls.Add(BuildShotsCard(), 0, 6);
+        root.Controls.Add(BuildInputCard(), 0, 3);
+        root.Controls.Add(BuildCategoryCard(), 0, 4);
+        root.Controls.Add(BuildTopicsCard(), 0, 5);
+        root.Controls.Add(BuildFocusCard(), 0, 6);
+        root.Controls.Add(BuildShotsCard(), 0, 7);
 
         Controls.Add(root);
     }
@@ -250,6 +253,18 @@ internal sealed class ReportForm : Form
         _aiCard.Content.Controls.Add(_aiText);
         _aiCard.HeaderExtras.Controls.Add(tools);
         return _aiCard;
+    }
+
+    private Control BuildInputCard()
+    {
+        var card = new Card("键盘与鼠标", "只记按了哪个键，不记输入内容");
+        card.Dock = DockStyle.Fill;
+        card.Margin = new Padding(P(18), 0, P(18), P(6));
+
+        _inputView.Dock = DockStyle.Fill;
+        _inputView.BackColor = Theme.Panel;
+        card.Content.Controls.Add(_inputView);
+        return card;
     }
 
     private Control BuildCategoryCard()
@@ -370,6 +385,8 @@ internal sealed class ReportForm : Form
         _store.Reload();
         _report = ReportBuilder.Build(_store, _config, _date, DateTime.Today);
         _report.Shots = ShotIndex.ForDay(_paths.DataDir, _date, _config);
+        _report.Input = InputTracker.Load(_paths.DataDir, _date);
+        _inputView.SetStat(_report.Input);
 
         var wd = new[] { "周日", "周一", "周二", "周三", "周四", "周五", "周六" }[(int)_date.DayOfWeek];
         _title.Text = $"{_date:yyyy 年 MM 月 dd 日} · {wd}";
@@ -549,6 +566,14 @@ internal sealed class ReportForm : Form
         if (_report.Topics.Count > 0)
             sb.AppendLine("看过的页面：" + string.Join("；", _report.Topics.Take(5).Select(t => t.Text)));
         sb.AppendLine($"专注度：{_report.Sessions} 段 / {_report.Switches} 次切换 / 最长连续 {Fmt(_report.LongestSessionSeconds)}");
+
+        if (_report.Input.TotalKeys > 0)
+        {
+            var combo = _report.Input.Keys.Count(kv => kv.Key.Contains('+'));
+            sb.AppendLine($"输入：按键 {_report.Input.TotalKeys} 次（组合键 {combo}）、" +
+                          $"鼠标移动 {_report.Input.DistanceCm / 100:F1} 米、" +
+                          $"点击 {_report.Input.Left + _report.Input.Middle + _report.Input.Right + _report.Input.Side} 次");
+        }
 
         try
         {

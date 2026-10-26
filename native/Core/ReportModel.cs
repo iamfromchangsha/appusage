@@ -73,4 +73,7 @@ internal sealed class ReportData
     public List<TopicSlice> Topics = new();
     public List<SiteSlice> Sites = new();
     public List<ShotRef> Shots = new();
+
+    /// <summary>当天的键盘 / 鼠标统计。</summary>
+    public InputDayStat Input { get; set; } = new();
 }

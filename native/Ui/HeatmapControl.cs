@@ -4,6 +4,16 @@ using AppUsage.Core;
 
 namespace AppUsage.Ui;
 
+/// <summary>热力图的着色指标。</summary>
+internal enum HeatmapMetric
+{
+    /// <summary>前台使用时长（秒）。</summary>
+    Duration = 0,
+
+    /// <summary>键鼠活动次数（按键 + 点击）。</summary>
+    Input = 1,
+}
+
 /// <summary>GitHub 贡献图样式的每日活跃热力图，自绘 GDI+。</summary>
 internal sealed class HeatmapControl : Control
 {
@@ -16,6 +26,9 @@ internal sealed class HeatmapControl : Control
     private int _palette;
     private int _hoverIndex = -1;
     private Point _hoverPoint;
+
+    private HeatmapMetric _metric = HeatmapMetric.Duration;
+    private IReadOnlyDictionary<DateTime, InputDayStat> _input = new Dictionary<DateTime, InputDayStat>();
 
     public event Action<DateTime>? CellClicked;
 
@@ -42,9 +55,24 @@ internal sealed class HeatmapControl : Control
         set { _palette = Math.Max(0, value); Invalidate(); }
     }
 
+    /// <summary>当前着色指标：时长 / 键鼠。</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public HeatmapMetric Metric
+    {
+        get => _metric;
+        set { if (_metric != value) { _metric = value; Invalidate(); } }
+    }
+
     public void SetData(IReadOnlyList<DayPoint> days)
     {
         _days = days;
+        Invalidate();
+    }
+
+    /// <summary>喂键鼠统计（热力图切到「键鼠」模式时才有颜色变化）。</summary>
+    public void SetInput(IReadOnlyDictionary<DateTime, InputDayStat> input)
+    {
+        _input = input ?? new Dictionary<DateTime, InputDayStat>();
         Invalidate();
     }
 
@@ -213,7 +241,7 @@ internal sealed class HeatmapControl : Control
                     continue;
                 }
 
-                var level = LevelOf(point.Seconds, quantiles);
+                var level = LevelOf(ValueOf(point), quantiles);
                 using (var b = new SolidBrush(levels[level]))
                     g.FillRectangle(b, rect);
 
@@ -243,23 +271,35 @@ internal sealed class HeatmapControl : Control
         DrawTooltip(g);
     }
 
+    /// <summary>当前指标下这天的数值（着色依据）。</summary>
+    private double ValueOf(DayPoint point) =>
+        _metric == HeatmapMetric.Input ? InputCountOf(point.Date) : point.Seconds;
+
+    /// <summary>某天的键鼠活动次数（按键 + 点击）。</summary>
+    public int InputCountOf(DateTime date) =>
+        _input.TryGetValue(date, out var stat) ? InputHistory.InputCount(stat) : 0;
+
+    /// <summary>某天的键鼠统计（没有数据时返回 null）。</summary>
+    public InputDayStat? InputOf(DateTime date) =>
+        _input.TryGetValue(date, out var stat) ? stat : null;
+
     private (double Q1, double Q2, double Q3) ComputeQuartiles()
     {
-        var values = _days.Where(d => d.Date <= DateTime.Today && d.Seconds > 0)
-                           .Select(d => d.Seconds).OrderBy(v => v).ToList();
+        var values = _days.Where(d => d.Date <= DateTime.Today && ValueOf(d) > 0)
+                           .Select(ValueOf).OrderBy(v => v).ToList();
         if (values.Count == 0) return (1, 1, 1);
         double At(double p) => values[Math.Min(values.Count - 1, (int)(values.Count * p))];
         return (At(0.25), At(0.50), At(0.75));
     }
 
-    private static int LevelOf(double seconds, (double Q1, double Q2, double Q3) q)
+    private static int LevelOf(double value, (double Q1, double Q2, double Q3) q)
     {
-        if (seconds <= 0) return 0;
+        if (value <= 0) return 0;
         // 所有非零日都一样（数据还很少）→ 直接给最高级，避免看起来是空的
         if (q.Q1 == q.Q2 && q.Q2 == q.Q3) return 4;
-        if (seconds <= q.Q1) return 1;
-        if (seconds <= q.Q2) return 2;
-        if (seconds <= q.Q3) return 3;
+        if (value <= q.Q1) return 1;
+        if (value <= q.Q2) return 2;
+        if (value <= q.Q3) return 3;
         return 4;
     }
 
@@ -268,7 +308,13 @@ internal sealed class HeatmapControl : Control
         if (_hoverIndex < 0 || _hoverIndex >= _days.Count) return;
         var point = _days[_hoverIndex];
 
-        string text = $"{point.Date:yyyy-MM-dd}  {FormatDuration(point.Seconds)}";
+        // 时长模式下也把当天的键鼠数据带出来（鼠标悬停就能看到，不用切模式）
+        string text = _metric == HeatmapMetric.Input
+            ? $"{point.Date:yyyy-MM-dd}  {InputText(point.Date)}"
+            : $"{point.Date:yyyy-MM-dd}  {FormatDuration(point.Seconds)}";
+        if (_metric == HeatmapMetric.Duration && InputOf(point.Date) is { } stat && InputHistory.InputCount(stat) > 0)
+            text += $"  ·  {InputText(point.Date)}";
+
         using var font = new Font("Segoe UI", 8f);
         var sz = g.MeasureString(text, font);
         int pad = Dpi.Px(this, 7);
@@ -288,6 +334,16 @@ internal sealed class HeatmapControl : Control
         using var brush = new SolidBrush(tipText);
         g.DrawString(text, font, brush, x + pad, y + Dpi.Px(this, 4));
     }
+
+    /// <summary>当天的键鼠摘要（给提示框 / 副标题用）。</summary>
+    public static string InputText(InputDayStat? stat)
+    {
+        if (stat is null) return "没有键鼠记录";
+        var clicks = stat.Left + stat.Middle + stat.Right + stat.Side;
+        return $"按键 {stat.TotalKeys:N0} 次 · 点击 {clicks:N0} 次 · 鼠标 {stat.DistanceCm / 100:N1} m";
+    }
+
+    private string InputText(DateTime date) => InputText(InputOf(date));
 
     internal static string FormatDuration(double seconds)
     {

@@ -30,6 +30,7 @@ internal sealed class SettingsForm : Form
     private readonly NumericUpDown _shotMax = new() { Minimum = 1, Maximum = 100 };
     private readonly TextBox _shotExcluded = new();
     private readonly Label _shotStatus = new() { AutoSize = false, Height = 34 };
+    private readonly CheckBox _inputEnabled = new() { Text = "统计键盘与鼠标活动", AutoSize = true };
 
     public SettingsForm(Config config, AppPaths paths)
     {
@@ -40,8 +41,10 @@ internal sealed class SettingsForm : Form
         BackColor = Theme.Bg;
         ForeColor = Theme.Text;
         Font = new Font("Segoe UI", 9f);
-        ClientSize = new Size(660, 620);
-        MinimumSize = new Size(620, 560);
+        // 窗口尺寸也要跟着 DPI 放大：里面所有布局常量都是 P() 放大过的，
+        // 窗口不放大就跟内容对不上（内容比窗口高，底下的东西全被挤没）。
+        ClientSize = new Size(P(660), P(620));
+        MinimumSize = new Size(P(620), P(560));
         StartPosition = FormStartPosition.CenterParent;
         DoubleBuffered = true;
 
@@ -55,23 +58,33 @@ internal sealed class SettingsForm : Form
     {
         var root = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 5,
             BackColor = Theme.Bg,
             Padding = new Padding(P(16)),
         };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(196)));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(214)));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(188)));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(228)));   // DeepSeek
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(262)));   // GitHub
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(216)));   // 截图
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(126)));   // 键鼠统计
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, P(52)));   // 保存 / 取消
 
         root.Controls.Add(BuildAiCard(), 0, 0);
         root.Controls.Add(BuildGithubCard(), 0, 1);
         root.Controls.Add(BuildShotsCard(), 0, 2);
-        root.Controls.Add(BuildButtons(), 0, 3);
+        root.Controls.Add(BuildInputCard(), 0, 3);
+        root.Controls.Add(BuildButtons(), 0, 4);
 
-        Controls.Add(root);
+        // 内容比窗口高时能滚动。
+        // 之前根面板直接 Dock=Fill，而各行高度是按 DPI 放大过的（合计比窗口高出一大截），
+        // 底下的卡片和「保存 / 取消」按钮直接被挤出可视区，谁都点不到。
+        var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Theme.Bg };
+        scroll.Controls.Add(root);
+        Controls.Add(scroll);
     }
 
     private Card BuildAiCard()
@@ -80,11 +93,12 @@ internal sealed class SettingsForm : Form
         card.Dock = DockStyle.Fill;
         card.Margin = new Padding(0, 0, 0, P(8));
 
-        var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 5, BackColor = Theme.Panel };
+        var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 6, BackColor = Theme.Panel };
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, P(96)));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         for (int i = 0; i < 4; i++) grid.RowStyles.Add(new RowStyle(SizeType.Absolute, P(26)));
-        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, P(28)));   // 勾选项 + 测试连接
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, P(22)));   // 状态文字
 
         _aiModel.Items.AddRange(new object[] { "deepseek-v4-pro", "deepseek-v4-flash" });
         _aiModel.DropDownWidth = 200;
@@ -104,7 +118,9 @@ internal sealed class SettingsForm : Form
 
         _aiStatus.ForeColor = Theme.Muted2;
         _aiStatus.Font = new Font("Segoe UI", 7.8f);
-        grid.Controls.Add(_aiStatus, 1, 4);
+        // 状态文字要占满整行：Dock=None 时表格只给它默认的 100px 宽，文字会被裁成一小截
+        _aiStatus.Dock = DockStyle.Fill;
+        grid.Controls.Add(_aiStatus, 1, 5);
 
         card.Content.Controls.Add(grid);
         return card;
@@ -116,11 +132,14 @@ internal sealed class SettingsForm : Form
         card.Dock = DockStyle.Fill;
         card.Margin = new Padding(0, 0, 0, P(8));
 
-        var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 6, BackColor = Theme.Panel };
+        var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 8, BackColor = Theme.Panel };
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, P(96)));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        for (int i = 0; i < 5; i++) grid.RowStyles.Add(new RowStyle(SizeType.Absolute, P(26)));
-        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        for (int i = 0; i < 4; i++) grid.RowStyles.Add(new RowStyle(SizeType.Absolute, P(26)));
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, P(28)));   // 测试 / 载入按钮
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, P(22)));   // 状态文字
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, P(26)));   // 仓库下拉
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, P(34)));   // Token 提示
 
         AddRow(grid, 0, "Token", _ghToken);
         AddRow(grid, 1, "拥有者", _ghOwner);
@@ -138,10 +157,11 @@ internal sealed class SettingsForm : Form
 
         _ghStatus.ForeColor = Theme.Muted2;
         _ghStatus.Font = new Font("Segoe UI", 7.8f);
-        grid.Controls.Add(_ghStatus, 1, 4);
+        _ghStatus.Dock = DockStyle.Fill;
+        grid.Controls.Add(_ghStatus, 1, 5);
 
         _ghRepoList.Dock = DockStyle.Fill;
-        grid.Controls.Add(_ghRepoList, 1, 5);
+        grid.Controls.Add(_ghRepoList, 1, 6);
 
         var warn = new Label
         {
@@ -152,7 +172,8 @@ internal sealed class SettingsForm : Form
             AutoSize = false,
             Dock = DockStyle.Fill,
         };
-        grid.Controls.Add(warn, 0, 4);
+        grid.Controls.Add(warn, 0, 7);
+        grid.SetColumnSpan(warn, 2);   // 提示文字要占满整行，不然只显示得下几个字
 
         card.Content.Controls.Add(grid);
         return card;
@@ -164,11 +185,12 @@ internal sealed class SettingsForm : Form
         card.Dock = DockStyle.Fill;
         card.Margin = new Padding(0, 0, 0, P(8));
 
-        var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 4, BackColor = Theme.Panel };
+        var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 5, BackColor = Theme.Panel };
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, P(96)));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         for (int i = 0; i < 3; i++) grid.RowStyles.Add(new RowStyle(SizeType.Absolute, P(26)));
-        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, P(26)));   // 排除的窗口
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, P(46)));   // 提示文字
 
         AddRow(grid, 0, "启用", _shotEnabled);
         AddRow(grid, 1, "间隔(分钟)", _shotInterval);
@@ -182,13 +204,43 @@ internal sealed class SettingsForm : Form
         _shotStatus.Text =
             "⚠ 截图可能包含屏幕上的聊天 / 邮件等敏感内容；\n" +
             "开启后截图会上传到你自己的 GitHub 私有仓库（只有你能看到，但仍属于上传到云端）。";
-        grid.Controls.Add(_shotStatus, 1, 3);
+        _shotStatus.Dock = DockStyle.Fill;
+        grid.Controls.Add(_shotStatus, 1, 4);
 
         card.Content.Controls.Add(grid);
         return card;
     }
 
-        /// <summary>把关键控件的屏幕坐标写进 trace.log（自动化验证用）。</summary>
+    private Card BuildInputCard()
+    {
+        var card = new Card("键盘与鼠标统计");
+        card.Dock = DockStyle.Fill;
+        card.Margin = new Padding(0, 0, 0, P(8));
+
+        var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, BackColor = Theme.Panel };
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, P(96)));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, P(26)));
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, P(46)));
+
+        AddRow(grid, 0, "启用", _inputEnabled);
+
+        var tip = new Label
+        {
+            Text = "会装一个全局键盘/鼠标钩子，只记你按了哪个键（A、SPACE、CTRL+C 这种），\n" +
+                   "不记输入的内容、不记窗口标题。每天一个文件存在 data\\input\\ 里。",
+            ForeColor = Theme.Muted2,
+            Font = new Font("Segoe UI", 7.8f),
+            AutoSize = false,
+            Dock = DockStyle.Fill,
+        };
+        grid.Controls.Add(tip, 1, 1);
+
+        card.Content.Controls.Add(grid);
+        return card;
+    }
+
+    /// <summary>把关键控件的屏幕坐标写进 trace.log（自动化验证用）。</summary>
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
@@ -373,6 +425,8 @@ internal sealed class SettingsForm : Form
         _shotMax.Value = Math.Clamp(s.MaxPerDay, 1, 100);
         _shotExcluded.Text = string.Join(", ", s.Excluded);
 
+        _inputEnabled.Checked = _config.Input.Enabled;
+
         // 仓库下拉：选中即填入拥有者 / 仓库名
         _ghRepoList.SelectedIndexChanged += (_, _) =>
         {
@@ -410,6 +464,8 @@ internal sealed class SettingsForm : Form
             .Select(x => x.Trim().ToLowerInvariant())
             .Distinct()
             .ToList();
+
+        _config.Input.Enabled = _inputEnabled.Checked;
     }
 
     private async Task TestAiAsync(Button btn)

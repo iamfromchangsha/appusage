@@ -19,12 +19,15 @@ internal sealed class MainForm : Form
     private readonly DataGridView _grid = new();
     private readonly Label _heatSub = new();
     private readonly Label _recentSub = new();
+    private Panel _heatLegend = null!;
     private Card _tableCard = null!;
     private SlimScrollBar? _slimScroll;
     private readonly TextBox _search = new();
     private readonly SlantButton _refresh = new();
     private readonly SlantButton[] _rangeButtons = new SlantButton[3];
     private readonly SlantButton[] _paletteButtons = new SlantButton[5];
+    private readonly SlantButton[] _metricButtons = new SlantButton[2];
+    private readonly InputHistory _inputHistory = new();
     private readonly TrayIcon _tray;
     private readonly TrayIcon? _sharedTray;
     private readonly string _dataDir;
@@ -36,6 +39,7 @@ internal sealed class MainForm : Form
 
     private int _weeks = 53;
     private int _palette;
+    private HeatmapMetric _metric = HeatmapMetric.Duration;
     private string _sortKey = "total";
     private bool _sortDesc = true;
     private bool _reallyExit;
@@ -178,9 +182,9 @@ internal sealed class MainForm : Form
         };
         inner.RowStyles.Add(new RowStyle(SizeType.Absolute, P(28)));
         inner.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        inner.RowStyles.Add(new RowStyle(SizeType.Absolute, P(22)));
-        inner.RowStyles.Add(new RowStyle(SizeType.Absolute, P(20)));
-        inner.RowStyles.Add(new RowStyle(SizeType.Absolute, P(78)));
+        inner.RowStyles.Add(new RowStyle(SizeType.Absolute, P(20)));   // 图例
+        inner.RowStyles.Add(new RowStyle(SizeType.Absolute, P(18)));   // 最近 30 天 标题
+        inner.RowStyles.Add(new RowStyle(SizeType.Absolute, P(64)));   // 最近 30 天 柱状图
 
         var top = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
         top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -200,6 +204,25 @@ internal sealed class MainForm : Form
             WrapContents = false,
             BackColor = Color.Transparent,
         };
+
+        // 最左边是「着色指标」切换：时长 / 键鼠
+        string[] metricLabels = { "时长", "键鼠" };
+        for (int i = 0; i < 2; i++)
+        {
+            int idx = i;
+            var b = MakeSegButton(metricLabels[i], 42);
+            b.Click += (_, _) =>
+            {
+                _metric = (HeatmapMetric)idx;
+                _heatmap.Metric = _metric;
+                for (int k = 0; k < 2; k++) StyleSeg(_metricButtons[k], k == idx);
+                RefreshWidgets();
+            };
+            _metricButtons[i] = b;
+            StyleSeg(b, i == 0);
+            tools.Controls.Add(b);
+        }
+        tools.Controls.Add(new Label { Text = "　", Width = P(10), AutoSize = false });
 
         string[] rangeLabels = { "3 个月", "半年", "一年" };
         int[] rangeWeeks = { 17, 26, 53 };
@@ -242,11 +265,14 @@ internal sealed class MainForm : Form
         inner.Controls.Add(top, 0, 0);
 
         _heatmap.Dock = DockStyle.Fill;
-        _heatmap.MinimumSize = new Size(0, P(170));   // 至少放得下 7 行，别被挤扁
+        // 下限别设太大：热力图控件一旦超过所在行高，就会把下面的图例整行盖掉
+        // （它 OnPaint 开头会 Clear 整个背景），图例一不见就不知道颜色代表什么了。
+        _heatmap.MinimumSize = new Size(0, P(84));
         _heatmap.CellClicked += OnCellClicked;
         inner.Controls.Add(_heatmap, 0, 1);
 
         var legend = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
+        _heatLegend = legend;
         legend.Paint += (_, e) =>
         {
             var levels = Theme.Levels(_palette);
@@ -260,7 +286,10 @@ internal sealed class MainForm : Form
                 using (var pen = new Pen(Color.FromArgb(70, 79, 227, 255))) e.Graphics.DrawRectangle(pen, sw);
             }
             e.Graphics.DrawString("多", font, dim, P(26 + 5 * 15 + 4), P(4));
-            e.Graphics.DrawString("点击任意格子查看当天明细", font, dim, P(170), P(4));
+            // 说明当前颜色代表什么，免得切到键鼠模式后不知道色深是什么意思
+            e.Graphics.DrawString(_metric == HeatmapMetric.Input ? "＝当天键鼠活动次数（按键 + 点击）" : "＝当天前台使用时长",
+                                  font, dim, P(118), P(4));
+            e.Graphics.DrawString("点击任意格子查看当天明细", font, dim, P(300), P(4));
         };
         inner.Controls.Add(legend, 0, 2);
 
@@ -533,13 +562,13 @@ internal sealed class MainForm : Form
         _grid.Invalidate();
     }
 
-    private static SlantButton MakeSegButton(string text)
+    private static SlantButton MakeSegButton(string text, int width = 54)
     {
         return new SlantButton
         {
             Text = text,
             Font = new Font("Segoe UI", 8.4f),
-            Size = new Size(Dpi.Px(54), Dpi.Px(26)),
+            Size = new Size(Dpi.Px(width), Dpi.Px(26)),
             Margin = new Padding(Dpi.Px(3), 0, Dpi.Px(3), 0),
         };
     }
@@ -612,11 +641,9 @@ internal sealed class MainForm : Form
 
         var heat = _store.Heatmap(_weeks);
         _heatmap.SetData(heat);
-        int filled = heat.Count(d => d.Seconds > 0);
-        var busiest = heat.OrderByDescending(d => d.Seconds).FirstOrDefault();
-        _heatSub.Text = busiest is { Seconds: > 0 }
-            ? $"{_weeks} 周 · {filled} 天有记录 · 最忙 {busiest.Date:MM-dd}（{Fmt(busiest.Seconds)}）"
-            : $"{_weeks} 周 · 暂无记录";
+        var input = _inputHistory.Load(_dataDir);
+        _heatmap.SetInput(input);
+        UpdateHeatSub(heat, input);
 
         var recent = _store.LastDays(30);
         _recent.SetData(recent);
@@ -630,6 +657,7 @@ internal sealed class MainForm : Form
         FillGrid();
 
         foreach (var c in _cards) c.Invalidate();
+        _heatLegend.Invalidate();
     }
 
     private void FillGrid()
@@ -688,7 +716,7 @@ internal sealed class MainForm : Form
         Theme.Apply(dark);
         Store.SetAccentPalette(Theme.AppPalette);
 
-        _header.ThemeToggle.Text = dark ? "☀ 浅色" : "☾ 深色";
+        _header.ThemeToggle.Text = dark ? "浅色" : "深色";
         _header.ThemeToggle.ForeColor = Theme.Muted;
         _header.Title.ForeColor = Theme.Text;
         _header.Title.Font = new Font("Segoe UI", dark ? 15f : 14f, FontStyle.Bold);
@@ -711,6 +739,8 @@ internal sealed class MainForm : Form
 
         foreach (var b in _rangeButtons) b.Invalidate();
         foreach (var b in _paletteButtons) b.Invalidate();
+        foreach (var b in _metricButtons) b.Invalidate();
+        _heatLegend.Invalidate();
         _refresh.Invalidate();
 
         _reportForm?.ApplyTheme();
@@ -752,6 +782,29 @@ internal sealed class MainForm : Form
             c.Invalidate();
             ApplyThemeToTree(c);
         }
+    }
+
+    /// <summary>热力图上方的副标题：跟着当前着色指标走。</summary>
+    private void UpdateHeatSub(IReadOnlyList<DayPoint> heat, Dictionary<DateTime, InputDayStat> input)
+    {
+        if (_metric == HeatmapMetric.Input)
+        {
+            var ranked = heat
+                .Select(d => (Date: d.Date, Count: input.TryGetValue(d.Date, out var s) ? InputHistory.InputCount(s) : 0))
+                .Where(x => x.Count > 0)
+                .OrderByDescending(x => x.Count)
+                .ToList();
+            _heatSub.Text = ranked.Count > 0
+                ? $"{_weeks} 周 · {ranked.Count} 天有键鼠记录 · 最猛 {ranked[0].Date:MM-dd}（{ranked[0].Count:N0} 次）"
+                : $"{_weeks} 周 · 暂无键鼠记录";
+            return;
+        }
+
+        int filled = heat.Count(d => d.Seconds > 0);
+        var busiest = heat.OrderByDescending(d => d.Seconds).FirstOrDefault();
+        _heatSub.Text = busiest is { Seconds: > 0 }
+            ? $"{_weeks} 周 · {filled} 天有记录 · 最忙 {busiest.Date:MM-dd}（{Fmt(busiest.Seconds)}）"
+            : $"{_weeks} 周 · 暂无记录";
     }
 
     private void OnCellClicked(DateTime day)
@@ -910,6 +963,12 @@ internal sealed class MainForm : Form
             if (_paletteButtons[i] is null) continue;
             var p = _paletteButtons[i].PointToScreen(new Point(_paletteButtons[i].Width / 2, _paletteButtons[i].Height / 2));
             Program.Trace($"palette button[{i}] screen = {p.X},{p.Y}");
+        }
+        for (int i = 0; i < _metricButtons.Length; i++)
+        {
+            if (_metricButtons[i] is null) continue;
+            var p = _metricButtons[i].PointToScreen(new Point(_metricButtons[i].Width / 2, _metricButtons[i].Height / 2));
+            Program.Trace($"metric button[{i}] screen = {p.X},{p.Y}");
         }
     }
 

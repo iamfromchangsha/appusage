@@ -40,6 +40,31 @@ internal sealed class ShotsConfig
         GithubToken.Length > 0 && GithubOwner.Length > 0 && GithubRepo.Length > 0;
 }
 
+/// <summary>键盘 / 鼠标点击统计的配置。</summary>
+internal sealed class InputConfig
+{
+    /// <summary>
+    /// 是否统计按键与鼠标点击。
+    /// 开着就意味着系统里挂了全局低级钩子（能看见你按了哪些键，
+    /// 但**不记输入内容**）。默认开着，想关在设置里改。
+    /// </summary>
+    [JsonPropertyName("enabled")] public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// 鼠标距离换算用的 DPI。
+    /// <para>
+    /// 默认 96 = 按**逻辑像素**换算，和老工具（键盘鼠标点击次数统计工具V1.0）的
+    /// 历史数据口径一致 —— 不然迁过来的老数据和新记的数据会差 1.5 倍
+    /// （实测老工具就是按 96 算的，本机 150% 缩放下两边的比值是 0.68 ≈ 96/144）。
+    /// </para>
+    /// <para>
+    /// 改成 144（本机的真实缩放）就得到**物理上真实**的厘米数，
+    /// 但那样就和历史数据不是一个口径了。
+    /// </para>
+    /// </summary>
+    [JsonPropertyName("distance_dpi")] public int DistanceDpi { get; set; } = 96;
+}
+
 /// <summary>读取与保存 config.json。</summary>
 internal sealed class Config
 {
@@ -55,6 +80,7 @@ internal sealed class Config
     [JsonPropertyName("site_names")] public Dictionary<string, string> SiteNames { get; set; } = new();
     [JsonPropertyName("ai")] public AiConfig Ai { get; set; } = new();
     [JsonPropertyName("shots")] public ShotsConfig Shots { get; set; } = new();
+    [JsonPropertyName("input")] public InputConfig Input { get; set; } = new();
 
     private static readonly JsonSerializerOptions Options = new()
     {

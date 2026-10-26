@@ -65,6 +65,7 @@ internal static class SelfTest
         TestShotIndexLookup();
         TestAiDecoding();
         TestAiResponseParsing();
+        TestInputStats();
         TestDataBackup();
 
             Console.WriteLine();
@@ -778,6 +779,9 @@ internal static class SelfTest
         try
         {
             File.WriteAllText(Path.Combine(dataDir, "logs", "2026-01-01.log"), "app\tC:\\a.exe\t标题\t1.0\t2.0\t1.000\n");
+            Directory.CreateDirectory(Path.Combine(dataDir, "input"));
+            File.WriteAllText(Path.Combine(dataDir, "input", "2026-01-01.json"),
+                "{\"Keys\":{\"A\":12},\"DistanceCm\":345.6,\"Left\":7,\"Middle\":0,\"Right\":1,\"Side\":0}");
             File.WriteAllText(Path.Combine(dataDir, "config.json"),
                 "{\"ai\":{\"api_key\":\"sk-super-secret\"},\"shots\":{\"github_token\":\"github_pat_super_secret\"}}");
 
@@ -788,6 +792,7 @@ internal static class SelfTest
             using var zip = new System.IO.Compression.ZipArchive(fs, System.IO.Compression.ZipArchiveMode.Read);
             var names = zip.Entries.Select(e => e.FullName).ToList();
             Check(names.Contains("logs/2026-01-01.log"), "日志打进去了", string.Join(",", names));
+            Check(names.Contains("input/2026-01-01.json"), "键鼠统计也打进去了");
             Check(names.Contains("config.json"), "配置也打进去了");
             Check(names.Any(n => n.EndsWith("README.txt", StringComparison.OrdinalIgnoreCase)), "带了一份说明");
 
@@ -804,10 +809,97 @@ internal static class SelfTest
             Check(!cfgText.Contains("github_pat_super_secret"), "配置里的 PAT 被抹掉了");
             Check(cfgText.Contains("\"ai\""), "抹掉密钥后配置结构还在");
             Check(ReadEntry("logs/2026-01-01.log").Contains("标题"), "日志内容完整");
+            Check(ReadEntry("input/2026-01-01.json").Contains("DistanceCm"), "键鼠统计内容完整");
         }
         finally
         {
             try { Directory.Delete(root, true); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// 键盘 / 鼠标统计：按键名映射、存盘读盘、以及「重启不能丢当天的数据」。
+    /// </summary>
+    private static void TestInputStats()
+    {
+        Console.WriteLine("— 键鼠统计 —");
+
+        // 按键名映射（口径要和旧工具一致，不然历史数据合不到一起）
+        Eq("A", KeyNames.NameOf(0x41, 0), "字母键");
+        Eq("7", KeyNames.NameOf(0x37, 0), "数字键");
+        Eq("F5", KeyNames.NameOf(0x74, 0), "功能键");
+        Eq("ENTER", KeyNames.NameOf(0x0D, 0), "回车");
+        Eq("SPACE", KeyNames.NameOf(0x20, 0), "空格");
+        Eq("LEFT", KeyNames.NameOf(0x25, 0), "方向键");
+        Eq("CTRL_L", KeyNames.NameOf(0xA2, 0), "左 Ctrl");
+        Eq("SHIFT", KeyNames.NameOf(0x10, 0), "Shift");
+        Eq(";", KeyNames.NameOf(0xBA, 0), "分号");
+        Eq(":", KeyNames.NameOf(0xBA, 0, true), "Shift + 分号 → 冒号");
+        Eq("[", KeyNames.NameOf(0xDB, 0), "左方括号");
+        Eq("{", KeyNames.NameOf(0xDB, 0, true), "Shift + 左方括号 → 大括号");
+        Check(KeyNames.IsPunctuation(0xBA), "分号算标点");
+        Check(!KeyNames.IsPunctuation(0x41), "字母不算标点");
+        Check(KeyNames.NameOf(0x07, 0x01).StartsWith("<"), "认不出的键退回扫描码写法");
+
+        // 存盘 → 读盘
+        var dir = Path.Combine(Path.GetTempPath(), "appusage_selftest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var day = new DateTime(2026, 3, 15);
+            var stat = new InputDayStat
+            {
+                Keys = new Dictionary<string, int> { ["A"] = 120, ["CTRL+C"] = 15 },
+                DistanceCm = 1234.5,
+                Left = 10, Middle = 1, Right = 2, Side = 0,
+            };
+            var path = InputTracker.FileFor(dir, day);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(stat));
+
+            var back = InputTracker.Load(dir, day);
+            Eq(135, back.TotalKeys, "读回来按键总数一致");
+            Eq(120, back.Keys.GetValueOrDefault("A"), "读回来单个键的次数一致");
+            Eq(1234.5, back.DistanceCm, "读回来鼠标距离一致");
+            Eq(10, back.Left, "读回来左键次数一致");
+
+            // 没数据的日子要能正常返回空的，不能炸
+            var empty = InputTracker.Load(dir, day.AddDays(1));
+            Eq(0, empty.TotalKeys, "没有数据的日子返回空统计");
+            Eq(0.0, empty.DistanceCm, "没有数据的日子距离为 0");
+
+            // 热力图「键鼠」模式用的历史读取：按日期索引 + 统计输入次数
+            var day2 = day.AddDays(-3);
+            var stat2 = new InputDayStat
+            {
+                Keys = new Dictionary<string, int> { ["A"] = 7 },
+                DistanceCm = 10, Left = 2, Middle = 0, Right = 1, Side = 0,
+            };
+            File.WriteAllText(InputTracker.FileFor(dir, day2),
+                System.Text.Json.JsonSerializer.Serialize(stat2));
+
+            var history = new InputHistory();
+            var map = history.Load(dir);
+            Eq(2, map.Count, "键鼠历史按天读齐");
+            Eq(135, map[day].TotalKeys, "历史里按键数对得上");
+            Eq(7, map[day2].TotalKeys, "历史里另一天的按键数对得上");
+
+            // 输入次数 = 按键 + 点击（热力图着色的依据）
+            Eq(148, InputHistory.InputCount(map[day]), "输入次数 = 按键 + 点击");
+            Eq(10, InputHistory.InputCount(map[day2]), "输入次数也算另一天");
+            Eq(0, InputHistory.InputCount(new InputDayStat()), "没活动时输入次数为 0");
+
+            // 文件改了要能读到新值（缓存不能把更新挡住）
+            var changed = new InputDayStat { Keys = new Dictionary<string, int> { ["A"] = 99 } };
+            File.WriteAllText(InputTracker.FileFor(dir, day2),
+                System.Text.Json.JsonSerializer.Serialize(changed));
+            File.SetLastWriteTimeUtc(InputTracker.FileFor(dir, day2), DateTime.UtcNow.AddSeconds(2));
+            var map2 = history.Load(dir);
+            Eq(99, map2[day2].TotalKeys, "文件改动后读到的是新值");
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { }
         }
     }
 

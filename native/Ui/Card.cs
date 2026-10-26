@@ -134,12 +134,13 @@ internal sealed class HeaderBar : Panel
         Today.TextAlign = ContentAlignment.MiddleRight;
         Today.BackColor = Color.Transparent;
 
-        ThemeToggle.Text = "☀ 浅色";
+        ThemeToggle.Text = "浅色";
         ThemeToggle.ForeColor = Theme.Muted;
         ThemeToggle.Font = new Font("Segoe UI", 8.4f);
         ThemeToggle.Size = new Size(Dpi.Px(70), Dpi.Px(26));
 
-        ReportButton.Text = "📋 日报";
+        // 不用 📋 之类的 emoji：本机没有可用的 emoji 字体回退，会渲染成豆腐块
+        ReportButton.Text = "日报";
         ReportButton.ForeColor = Theme.Accent2;
         ReportButton.Font = new Font("Segoe UI", 8.4f);
         ReportButton.Size = new Size(Dpi.Px(80), Dpi.Px(26));
@@ -158,10 +159,21 @@ internal sealed class HeaderBar : Panel
         int x = Dpi.Px(Theme.Angular ? 62 : 58);
         Title.SetBounds(x, Dpi.Px(6), Dpi.Px(360), Dpi.Px(30));
         Subtitle.SetBounds(x, Dpi.Px(36), Dpi.Px(380), Dpi.Px(18));
-        Status.SetBounds(Width - Dpi.Px(452), Dpi.Px(14), Dpi.Px(170), Dpi.Px(24));
-        Today.SetBounds(Width - Dpi.Px(272), Dpi.Px(11), Dpi.Px(170), Dpi.Px(28));
-        ReportButton.SetBounds(Width - Dpi.Px(182), Dpi.Px(12), Dpi.Px(80), Dpi.Px(26));
-        ThemeToggle.SetBounds(Width - Dpi.Px(92), Dpi.Px(12), Dpi.Px(70), Dpi.Px(26));
+
+        // 右侧一排，从右往左依次摆：主题按钮 / 日报按钮 / 今日时长 / 状态点。
+        // 之前「今日时长」是个右对齐的透明 Label，盒子正好盖住「日报」按钮，
+        // 按钮既看不见也点不到（日报页根本进不去）。现在按间距排开，互不重叠。
+        int gap = Dpi.Px(12);
+        int right = Width - Dpi.Px(16);
+
+        ThemeToggle.SetBounds(right - Dpi.Px(70), Dpi.Px(12), Dpi.Px(70), Dpi.Px(26));
+        right = ThemeToggle.Left - gap;
+        ReportButton.SetBounds(right - Dpi.Px(80), Dpi.Px(12), Dpi.Px(80), Dpi.Px(26));
+        right = ReportButton.Left - gap;
+        // Label 是右对齐的：文字贴着盒子右沿，所以盒子右沿必须让开日报按钮左沿
+        Today.SetBounds(right - Dpi.Px(170), Dpi.Px(11), Dpi.Px(170), Dpi.Px(28));
+        right = Today.Left - gap;
+        Status.SetBounds(right - Dpi.Px(170), Dpi.Px(14), Dpi.Px(170), Dpi.Px(24));
     }
 
     protected override void OnPaint(PaintEventArgs e)

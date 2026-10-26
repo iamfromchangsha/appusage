@@ -60,7 +60,28 @@ internal static class DataBackup
                 }
             }
 
-            // 2) 配置（密钥抹掉）。配置不一定在 dataDir 里，所以由调用方给路径。
+            // 2) 键鼠统计（一天一个 JSON）。这份数据是从旧工具迁过来的 8 个月历史，
+            //    同样只躺在 data\input\ 里，漏了就白迁了。
+            var inputDir = Path.Combine(dataDir, "input");
+            if (Directory.Exists(inputDir))
+            {
+                foreach (var f in Directory.GetFiles(inputDir, "*.json"))
+                {
+                    try
+                    {
+                        var entry = zip.CreateEntry($"input/{Path.GetFileName(f)}", CompressionLevel.Optimal);
+                        using var src = new FileStream(f, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                        using var dst = entry.Open();
+                        src.CopyTo(dst);
+                    }
+                    catch (IOException)
+                    {
+                        Program.Trace($"[backup] 跳过读不了的文件: {Path.GetFileName(f)}");
+                    }
+                }
+            }
+
+            // 3) 配置（密钥抹掉）。配置不一定在 dataDir 里，所以由调用方给路径。
             if (!string.IsNullOrWhiteSpace(configPath) && File.Exists(configPath))
             {
                 var cfg = Config.Load(Path.GetFullPath(configPath));
@@ -72,7 +93,7 @@ internal static class DataBackup
                 { WriteIndented = true }));
             }
 
-            // 3) 说明
+            // 4) 说明
             var readme = zip.CreateEntry("README.txt", CompressionLevel.Optimal);
             using var rw = new StreamWriter(readme.Open(), new UTF8Encoding(false));
             rw.Write(ReadmeText());
@@ -85,8 +106,10 @@ internal static class DataBackup
         "========================\n\n" +
         $"导出时间：{DateTime.Now:yyyy-MM-dd HH:mm}\n\n" +
         "logs/        原始使用记录（纯文本，一天一个文件，制表符分隔）\n" +
+        "input/       键盘与鼠标统计（一天一个 JSON：按键次数、鼠标距离、点击次数）\n" +
         "config.json  界面与统计配置\n\n" +
-        "恢复方法：把 logs 目录里的 .log 文件放回应用的 data\\logs\\ 目录即可。\n\n" +
+        "恢复方法：把 logs 目录里的 .log 文件放回应用的 data\\logs\\ 目录，\n" +
+        "          把 input 目录里的 .json 文件放回应用的 data\\input\\ 目录即可。\n\n" +
         "注意：config.json 里的 DeepSeek API Key 和 GitHub PAT **已经被抹掉**，\n" +
         "      恢复后需要自己在「设置」里重新填（这是故意的：备份容易被转发出去，\n" +
         "      密钥不该跟着走）。\n\n" +

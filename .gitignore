@@ -29,6 +29,11 @@ __pycache__/
 .vscode/
 .idea/
 
+# ---- 临时目录（自动化验证时的截图 / 脚本）----
+.tmp/
+.tmp_probe/
+*.tmp/
+
 # ---- 系统文件 ----
 Thumbs.db
 Desktop.ini

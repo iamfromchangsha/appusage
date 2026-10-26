@@ -48,6 +48,7 @@ internal static class Program
 
         Tracker? tracker = null;
         ShotService? shots = null;
+        InputTracker? input = null;
         SingleInstance? single = null;
         try
         {
@@ -188,6 +189,14 @@ internal static class Program
             tracker = new Tracker(paths.LogDir, config);
             tracker.Start();
 
+            // 键盘 / 鼠标点击统计（全局低级钩子）
+            if (config.Input.Enabled)
+            {
+                input = new InputTracker(paths.DataDir, config.Input.DistanceDpi);
+                if (!input.Start())
+                    Program.Trace("[input] 钩子装不上（可能被安全软件拦了），键鼠统计不可用");
+            }
+
             // --test-shot 调试时会留下**全尺寸**截图，跟「本地不长期留全图」的原则冲突。
             // 下次正常启动就把它清掉，最多只存在一份临时全图。
             try
@@ -232,6 +241,7 @@ internal static class Program
         {
             shots?.Dispose();
             tracker?.Dispose();
+            input?.Dispose();
             single?.Dispose();
         }
         return 0;
