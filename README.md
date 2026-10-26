@@ -442,7 +442,20 @@ powershell -File scripts\status.ps1
 
 # 导出某天的日报到文本
 .\AppUsage.exe --dump 2026-10-22
+
+# 提交前扫密钥（必须过）
+powershell -ExecutionPolicy Bypass -File scripts\check-secrets.ps1
 ```
+
+> **别把真密钥贴进源码。** 这个仓库是公开的，贴进去就是公开的。
+> `scripts\check-secrets.ps1` 会扫所有被跟踪的文件：
+> 既找「长得像密钥」的字符串（`sk-` + 32 位 hex、`github_pat_`、`ghp_`…），
+> 也拿本机 `config.json` 里的 **api_key / github_token 原值**去逐个比对，
+> 命中就退出码 1，**提交前必须先跑它**。
+>
+> 真密钥只应该待在 `config.json`（已被 `.gitignore` 排除）里。
+> 需要样例就复制 `config.example.json`。
+> **密钥一旦进过公开仓库，必须去服务商那边轮换**——删代码、删历史都不算数。
 
 自测是**纯逻辑**的（不联网、不碰真实数据），所以随时可以跑。
 新增功能时顺手在 `native\Core\SelfTest.cs` 里加一条用例，比手动点界面可靠得多。

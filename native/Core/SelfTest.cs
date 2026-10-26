@@ -203,7 +203,7 @@ internal static class SelfTest
         var pat = "github_pat_" + new string('A', 22) + new string('b', 60);
         Check(pat.Length == 93, "用例 PAT 长度确实是 93");
         Eq(pat, TokenUtil.Extract(pat, TokenUtil.GitHubPattern), "干净的 fine-grained PAT");
-        Eq(pat, TokenUtil.Extract(pat + "sk-2f1de6cc719640a3bf7b011d04804d48", TokenUtil.GitHubPattern),
+        Eq(pat, TokenUtil.Extract(pat + "sk-" + new string('c', 32), TokenUtil.GitHubPattern),
             "PAT 后面粘了别的 key → 只取前 93 字符");
         Eq(pat, TokenUtil.Extract("前面有字 " + pat, TokenUtil.GitHubPattern), "前面粘了别的文字也能取到");
 
@@ -211,7 +211,7 @@ internal static class SelfTest
         Eq(classic, TokenUtil.Extract(classic, TokenUtil.GitHubPattern), "classic PAT");
         Eq(classic, TokenUtil.Extract(classic + "sk-abc", TokenUtil.GitHubPattern), "classic PAT 后面粘了 key");
 
-        var sk = "sk-" + "2f1de6cc719640a3bf7b011d04804d48";
+        var sk = "sk-" + new string('d', 32);
         Eq(sk, TokenUtil.Extract(sk, TokenUtil.AiPattern), "DeepSeek key");
         Eq(sk, TokenUtil.Extract(sk + " github_pat_x", TokenUtil.AiPattern), "key 后面粘了 PAT → 只取 key");
         Eq("", TokenUtil.Extract("   ", TokenUtil.AiPattern), "空白");
